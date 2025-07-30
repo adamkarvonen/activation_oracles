@@ -121,7 +121,7 @@ def load_gemma_scope_jumprelu_sae(
     )
 
     params = np.load(path_to_params)
-    pt_params = {k: torch.from_numpy(v).cpu() for k, v in params.items()}
+    pt_params = {k: torch.from_numpy(v) for k, v in params.items()}
 
     d_in = params["W_enc"].shape[0]
     d_sae = params["W_enc"].shape[1]
