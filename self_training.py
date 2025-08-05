@@ -36,79 +36,35 @@ from interp_tools.config import SelfInterpTrainingConfig, get_sae_info
 # ==============================================================================
 
 
-def build_training_prompt(
-    tokenizer: PreTrainedTokenizer,
-    device: torch.device,
-) -> tuple[torch.Tensor, list[int]]:
-    """
-    Constructs a few-shot prompt for generating feature explanations.
-
-    Args:
-        demo_features: A dictionary mapping feature indices to their demo explanations.
-        target_feature_idx: The index of the new feature to explain.
-        tokenizer: The model's tokenizer.
-        device: The torch device to place tensors on.
-
-    Returns:
-        A tuple containing the tokenized input IDs and the positions of the 'X'
-        placeholders where activations should be steered.
-    """
+def build_training_prompt() -> str:
     # TODO: Experiment with providing instructions to the model
 
-    instruction = """
-You are an introspection assistant. Your task is to explain a neural concept injected at ‹x>.
+    #     instruction = """
+    # You are an introspection assistant. Your task is to explain a neural concept injected at ‹x>.
 
-You must:
-1.  Write a **positive example** that triggers the concept as strongly as possible.
-2.  Write a **negative example** that is minimally different (by Levenshtein distance) but does **not** trigger the concept.
-3.  Write a one-line **explanation** of the core difference.
+    # You must:
+    # 1.  Write a **positive example** that triggers the concept as strongly as possible.
+    # 2.  Write a **negative example** that is minimally different (by Levenshtein distance) but does **not** trigger the concept.
+    # 3.  Write a one-line **explanation** of the core difference.
 
-Priorities:
-1.  Maximize activation in the positive example.
-2.  Minimize activation in the negative example.
-3.  Maximize similarity between the two examples.
+    # Priorities:
+    # 1.  Maximize activation in the positive example.
+    # 2.  Minimize activation in the negative example.
+    # 3.  Maximize similarity between the two examples.
 
-Use this exact format:
-Positive example: <sentence>
-Negative example: <sentence>
-Explanation: <one line>
-<END_OF_EXAMPLE>"""
+    # Use this exact format:
+    # Positive example: <sentence>
+    # Negative example: <sentence>
+    # Explanation: <one line>
+    # <END_OF_EXAMPLE>"""
 
-    question = """Can you write me a sentence that relates to the word 'X' and a similar sentence that does not relate to the word?"""
+    instruction = """Respond with the following format:\n\nPositive example: ...\n\nNegative example: ...\n\nExplanation: ...\n\n<END_OF_EXAMPLE>"""
 
-    messages = []
+    question = """Can you write me a sentence that relates to the concept 'X' and a similar sentence that does not relate to the concept?"""
+
     prompt = f"{instruction}\n\n{question}"
 
-    # Add the final prompt for the target feature
-    messages.extend(
-        [
-            {"role": "user", "content": prompt},
-        ]
-    )
-
-    formatted_input = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=False,
-        continue_final_message=True,
-    )
-
-    # Find the positions of the placeholder 'X'
-    token_ids = tokenizer.encode(formatted_input, add_special_tokens=False)
-    x_token_id = tokenizer.encode("X", add_special_tokens=False)[0]
-    positions = [i for i, token_id in enumerate(token_ids) if token_id == x_token_id]
-
-    # Ensure we found a placeholder for each demo and the final target
-    expected_positions = 1
-    assert len(positions) == expected_positions, (
-        f"Expected to find {expected_positions} 'X' placeholders, but found {len(positions)}."
-    )
-
-    tokenized_input = tokenizer(
-        formatted_input, return_tensors="pt", add_special_tokens=False
-    ).to(device)
-
-    return tokenized_input.input_ids, positions
+    return prompt
 
 
 def parse_generated_explanation(text: str) -> Optional[dict[str, str]]:
@@ -278,10 +234,7 @@ def construct_train_dataset(
     training_examples: list[dict],
     sae: jumprelu_sae.JumpReluSAE,
     tokenizer: PreTrainedTokenizer,
-    device: torch.device,
 ) -> list[dict]:
-    cur = 0
-
     input_messages = [{"role": "user", "content": input_prompt}]
 
     input_prompt_ids: list[int] = tokenizer.apply_chat_template(
@@ -296,112 +249,54 @@ def construct_train_dataset(
 
     training_data = []
 
-    pbar = tqdm(total=dataset_size, desc="Constructing training dataset")
+    for i in tqdm(range(dataset_size), desc="Constructing training dataset"):
+        target_response = f"Positive example: {training_examples[i]['original_sentence']}\n\nNegative example: {training_examples[i]['rewritten_sentence']}\n\nExplanation: {training_examples[i]['explanation']}\n\n<END_OF_EXAMPLE>"
 
-    # TODO: double check this
-    while cur < dataset_size:
-        all_conversations = []
+        full_messages = input_messages + [
+            {"role": "assistant", "content": target_response}
+        ]
 
-        max_length = 0
+        full_prompt_ids: list[int] = tokenizer.apply_chat_template(
+            full_messages,
+            tokenize=True,
+            add_generation_prompt=False,
+            return_tensors=None,
+            padding=False,
+            enable_thinking=False,
+        )
+        target_feature_idx = training_examples[i]["feature_idx"]
 
-        for i in range(cfg.train_batch_size):
-            target_response = f"Positive example: {training_examples[cur]['original_sentence']}\n\nNegative example: {training_examples[cur]['rewritten_sentence']}\n\nExplanation: {training_examples[cur]['explanation']}\n\n<END_OF_EXAMPLE>"
+        # 2. Prepare feature vectors for steering
+        # We use decoder weights (W_dec) as they map from the feature space back to the residual stream.
+        all_feature_indices = [target_feature_idx]
 
-            full_messages = input_messages + [
-                {"role": "assistant", "content": target_response}
-            ]
+        # .clone() because otherwise we will save the entire W_dec in pickle for each training example
+        if cfg.use_decoder_vectors:
+            feature_vectors = [sae.W_dec[i].clone() for i in all_feature_indices]
+        else:
+            feature_vectors = [sae.W_enc[:, i].clone() for i in all_feature_indices]
 
-            full_prompt_ids: list[int] = tokenizer.apply_chat_template(
-                full_messages,
-                tokenize=True,
-                add_generation_prompt=False,
-                return_tensors=None,
-                padding=False,
-                enable_thinking=False,
-            )
+        assistant_start_idx = len(input_prompt_ids)
 
-            max_length = max(max_length, len(full_prompt_ids))
+        labels = full_prompt_ids.copy()
+        for i in range(assistant_start_idx):
+            labels[i] = -100
 
-            all_conversations.append(full_messages)
+        positions = []
+        for i in range(assistant_start_idx):
+            if full_prompt_ids[i] == x_token_id:
+                positions.append(i)
+        assert len(positions) == 1, "Expected exactly one X token"
 
-        batch_steering_vectors = []
-        batch_feature_indices = []
-        batch_positions = []
-        batch_tokens = []
-        batch_labels = []
-        batch_attn_masks = []
-
-        for i in range(cfg.train_batch_size):
-            if cur >= dataset_size:
-                break
-
-            target_feature_idx = training_examples[cur]["feature_idx"]
-            batch_feature_indices.append(target_feature_idx)
-
-            # 2. Prepare feature vectors for steering
-            # We use decoder weights (W_dec) as they map from the feature space back to the residual stream.
-            all_feature_indices = [target_feature_idx]
-
-            if cfg.use_decoder_vectors:
-                feature_vectors = [sae.W_dec[i].clone() for i in all_feature_indices]
-            else:
-                feature_vectors = [sae.W_enc[:, i].clone() for i in all_feature_indices]
-
-            batch_steering_vectors.append(feature_vectors)
-
-            full_messages = all_conversations[i]
-
-            full_prompt_ids: list[int] = tokenizer.apply_chat_template(
-                full_messages,
-                tokenize=True,
-                add_generation_prompt=False,
-                return_tensors=None,
-                padding=False,
-                enable_thinking=False,
-            )
-
-            padding_length = max_length - len(full_prompt_ids)
-            padding_tokens = [tokenizer.pad_token_id] * padding_length
-
-            assistant_start_idx = len(input_prompt_ids) + padding_length
-            full_prompt_ids = padding_tokens + full_prompt_ids
-
-            full_prompt_ids = torch.tensor(full_prompt_ids, dtype=torch.long).to(device)
-            labels = full_prompt_ids.clone()
-            labels[:assistant_start_idx] = -100
-            attn_mask = torch.ones_like(full_prompt_ids, dtype=torch.bool).to(device)
-            attn_mask[:padding_length] = False
-
-            batch_tokens.append(full_prompt_ids)
-            batch_labels.append(labels)
-            batch_attn_masks.append(attn_mask)
-
-            positions = []
-            for i in range(assistant_start_idx):
-                if full_prompt_ids[i] == x_token_id:
-                    positions.append(i)
-            assert len(positions) == 1, "Expected exactly one X token"
-            batch_positions.append(positions)
-
-            cur += 1
-
-        input_ids = torch.stack(batch_tokens)
-        labels = torch.stack(batch_labels)
-        attn_mask = torch.stack(batch_attn_masks)
-
-        training_batch = {
-            "input_ids": input_ids,
+        training_data_point = {
+            "input_ids": full_prompt_ids,
             "labels": labels,
-            "attention_mask": attn_mask,
-            "steering_vectors": batch_steering_vectors,
-            "positions": batch_positions,
-            "feature_indices": batch_feature_indices,
+            "steering_vectors": feature_vectors,
+            "positions": positions,
+            "feature_indices": all_feature_indices,
         }
 
-        training_data.append(training_batch)
-        pbar.update(cfg.train_batch_size)
-
-    pbar.close()
+        training_data.append(training_data_point)
 
     return training_data
 
@@ -413,10 +308,8 @@ def construct_eval_dataset(
     eval_feature_indices: list[int],
     sae: jumprelu_sae.JumpReluSAE,
     tokenizer: PreTrainedTokenizer,
-    device: torch.device,
 ) -> list[dict]:
     """Every prompt is exactly the same - the only difference is the steering vectors."""
-    cur = 0
 
     input_messages = [{"role": "user", "content": input_prompt}]
 
@@ -428,82 +321,100 @@ def construct_eval_dataset(
         padding=False,
         enable_thinking=False,
     )
-    input_prompt_ids = (
-        torch.tensor(input_prompt_ids, dtype=torch.long).to(device).squeeze()
-    )
-    labels = input_prompt_ids.clone()
-    attn_mask = torch.ones_like(input_prompt_ids, dtype=torch.bool).to(device)
+    labels = input_prompt_ids.copy()
 
     x_token_id = tokenizer.encode("X", add_special_tokens=False)[0]
 
     eval_data = []
 
-    pbar = tqdm(total=dataset_size, desc="Constructing eval dataset")
+    first_position = None
 
-    while cur < len(eval_feature_indices):
-        batch_steering_vectors = []
-        batch_feature_indices = []
-        batch_positions = []
-        batch_tokens = []
-        batch_labels = []
-        batch_attn_masks = []
+    for i in tqdm(range(dataset_size), desc="Constructing eval dataset"):
+        target_feature_idx = eval_feature_indices[i]
 
-        for i in range(cfg.eval_batch_size):
-            if cur >= dataset_size:
-                break
+        # 2. Prepare feature vectors for steering
+        # We use decoder weights (W_dec) as they map from the feature space back to the residual stream.
+        all_feature_indices = [target_feature_idx]
 
-            target_feature_idx = eval_feature_indices[cur]
-            batch_feature_indices.append(target_feature_idx)
+        if cfg.use_decoder_vectors:
+            feature_vectors = [sae.W_dec[i].clone() for i in all_feature_indices]
+        else:
+            feature_vectors = [sae.W_enc[:, i].clone() for i in all_feature_indices]
 
-            # 2. Prepare feature vectors for steering
-            # We use decoder weights (W_dec) as they map from the feature space back to the residual stream.
-            all_feature_indices = [target_feature_idx]
+        positions = []
+        for i in range(len(input_prompt_ids)):
+            if input_prompt_ids[i] == x_token_id:
+                positions.append(i)
 
-            if cfg.use_decoder_vectors:
-                feature_vectors = [sae.W_dec[i].clone() for i in all_feature_indices]
-            else:
-                feature_vectors = [sae.W_enc[:, i].clone() for i in all_feature_indices]
+        assert len(positions) == 1, "Expected exactly one X token"
 
-            batch_steering_vectors.append(feature_vectors)
-            batch_tokens.append(input_prompt_ids)
-            batch_labels.append(labels)
-            batch_attn_masks.append(attn_mask)
-
-            positions = []
-            for i in range(len(input_prompt_ids)):
-                if input_prompt_ids[i] == x_token_id:
-                    positions.append(i)
-
-            assert len(positions) == 1, "Expected exactly one X token"
-            batch_positions.append(positions)
-
-            cur += 1
-
-        batch_input_ids = torch.stack(batch_tokens)
-        batch_labels = torch.stack(batch_labels)
-        batch_attn_mask = torch.stack(batch_attn_masks)
-
-        first_position = batch_positions[0][0]
-
-        for i in range(len(batch_positions)):
-            assert batch_positions[i][0] == first_position, (
+        if first_position is None:
+            first_position = positions[0]
+        else:
+            assert positions[0] == first_position, (
                 "Expected all positions to be the same"
             )
 
-        eval_batch = {
-            "input_ids": batch_input_ids,
-            "labels": batch_labels,
-            "attention_mask": batch_attn_mask,
-            "steering_vectors": batch_steering_vectors,
-            "positions": batch_positions,
-            "feature_indices": batch_feature_indices,
+        eval_data_point = {
+            "input_ids": input_prompt_ids,
+            "labels": labels,
+            "steering_vectors": feature_vectors,
+            "positions": positions,
+            "feature_indices": all_feature_indices,
         }
 
-        eval_data.append(eval_batch)
-        pbar.update(cfg.eval_batch_size)
-    pbar.close()
+        eval_data.append(eval_data_point)
 
     return eval_data
+
+
+def construct_batch(
+    training_data: list[dict],
+    tokenizer: PreTrainedTokenizer,
+    device: torch.device,
+) -> list[dict]:
+    max_length = 0
+    for data_point in training_data:
+        max_length = max(max_length, len(data_point["input_ids"]))
+
+    batch_tokens = []
+    batch_labels = []
+    batch_attn_masks = []
+    batch_positions = []
+    batch_steering_vectors = []
+    batch_feature_indices = []
+
+    for data_point in training_data:
+        padding_length = max_length - len(data_point["input_ids"])
+        padding_tokens = [tokenizer.pad_token_id] * padding_length
+        data_point["input_ids"] = padding_tokens + data_point["input_ids"]
+        data_point["labels"] = [-100] * padding_length + data_point["labels"]
+
+        input_ids = torch.tensor(data_point["input_ids"], dtype=torch.long).to(device)
+        labels = torch.tensor(data_point["labels"], dtype=torch.long).to(device)
+        attn_mask = torch.ones_like(input_ids, dtype=torch.bool).to(device)
+
+        attn_mask[:padding_length] = False
+
+        batch_tokens.append(input_ids)
+        batch_labels.append(labels)
+        batch_attn_masks.append(attn_mask)
+
+        positions = data_point["positions"]
+        positions = [p + padding_length for p in positions]
+
+        batch_positions.append(positions)
+        batch_steering_vectors.append(data_point["steering_vectors"])
+        batch_feature_indices.append(data_point["feature_indices"])
+
+    return {
+        "input_ids": torch.stack(batch_tokens),
+        "labels": torch.stack(batch_labels),
+        "attention_mask": torch.stack(batch_attn_masks),
+        "steering_vectors": batch_steering_vectors,
+        "positions": batch_positions,
+        "feature_indices": batch_feature_indices,
+    }
 
 
 def train_features_batch(
@@ -663,7 +574,7 @@ def train_model(
 ):
     max_grad_norm = 1.0
     wandb_project = "sae_introspection"
-    run_name = f"{cfg.model_name}-layer{cfg.sae_layer}"
+    run_name = f"{cfg.model_name}-layer{cfg.sae_layer}-encoder-shorter-prompt"
 
     if use_wandb:
         wandb.init(project=wandb_project, name=run_name, config=asdict(cfg))
@@ -686,9 +597,14 @@ def train_model(
         os.remove("eval_logs.json")
 
     for epoch in range(cfg.num_epochs):
-        pbar = tqdm(training_data, desc=f"Epoch {epoch + 1}")
-        for batch_idx, t_batch in enumerate(pbar):
-            if batch_idx % 100 == 0:
+        for i in tqdm(
+            range(0, len(training_data), cfg.train_batch_size),
+            desc=f"Training epoch {epoch + 1}",
+        ):
+            t_batch = training_data[i : i + cfg.train_batch_size]
+            t_batch = construct_batch(t_batch, tokenizer, device)
+
+            if i % 100 == 0:
                 torch.cuda.empty_cache()
                 gc.collect()
             loss = train_features_batch(cfg, t_batch, model, submodule, device, dtype)
@@ -715,7 +631,13 @@ def train_model(
                 with torch.no_grad():
                     all_sentence_metrics = []
                     all_feature_results_this_eval_step = []
-                    for e_batch in tqdm(eval_data, desc="Evaluating model"):
+                    for i in tqdm(
+                        range(0, len(eval_data), cfg.eval_batch_size),
+                        desc="Evaluating model",
+                    ):
+                        e_batch = eval_data[i : i + cfg.eval_batch_size]
+                        e_batch = construct_batch(e_batch, tokenizer, device)
+
                         feature_results = eval_features_batch(
                             cfg=cfg,
                             eval_batch=e_batch,
@@ -777,10 +699,15 @@ def main():
     cfg.train_batch_size = 3
     cfg.eval_batch_size = cfg.train_batch_size * 16
     cfg.training_data_filename = "contrastive_rewriting_results_131k.pkl"
+    cfg.training_data_filename = (
+        "contrastive_rewriting_results_google_gemma-2-9b-it_num_features_200000.pkl"
+    )
     # cfg.training_data_filename = "contrastive_rewriting_results_2k.pkl"
     # cfg.training_data_filename = "contrastive_rewriting_results.pkl"
     verbose = True
-    cfg.use_decoder_vectors = True
+    cfg.use_decoder_vectors = False
+
+    dataset_size = 10000
 
     # %%
     print(asdict(cfg))
@@ -848,44 +775,26 @@ def main():
 
     assert len(cfg.eval_features) == cfg.eval_set_size
 
-    orig_input_ids, orig_positions = build_training_prompt(tokenizer, device)
-    orig_input_ids = orig_input_ids.squeeze()
-    train_eval_prompt = tokenizer.decode(orig_input_ids)
+    train_eval_prompt = build_training_prompt()
 
-    train_data_filename = cfg.training_data_filename.replace(".pkl", "_train.pkl")
-    eval_data_filename = cfg.training_data_filename.replace(".pkl", "_eval.pkl")
+    training_data = construct_train_dataset(
+        cfg,
+        # len(training_examples),
+        dataset_size,
+        train_eval_prompt,
+        training_examples,
+        sae,
+        tokenizer,
+    )
 
-    if not os.path.exists(train_data_filename):
-        training_data = construct_train_dataset(
-            cfg,
-            len(training_examples),
-            train_eval_prompt,
-            training_examples,
-            sae,
-            tokenizer,
-            device,
-        )
-        with open(train_data_filename, "wb") as f:
-            pickle.dump(training_data, f)
-    else:
-        with open(train_data_filename, "rb") as f:
-            training_data = pickle.load(f)
-
-    if not os.path.exists(eval_data_filename):
-        eval_data = construct_eval_dataset(
-            cfg,
-            cfg.eval_set_size,
-            train_eval_prompt,
-            cfg.eval_features,
-            sae,
-            tokenizer,
-            device,
-        )
-        with open(eval_data_filename, "wb") as f:
-            pickle.dump(eval_data, f)
-    else:
-        with open(eval_data_filename, "rb") as f:
-            eval_data = pickle.load(f)
+    eval_data = construct_eval_dataset(
+        cfg,
+        cfg.eval_set_size,
+        train_eval_prompt,
+        cfg.eval_features,
+        sae,
+        tokenizer,
+    )
 
     # %%
 
@@ -894,7 +803,7 @@ def main():
     # training_data = training_data[:100]
     # temp_eval_data = eval_data[:10]
 
-    temp_eval_data = eval_data[:6]
+    temp_eval_data = eval_data[:250]
 
     train_model(
         cfg,
