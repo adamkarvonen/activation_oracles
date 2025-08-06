@@ -73,6 +73,7 @@ class SelfInterpTrainingConfig:
 
     random_seed: int = 42  # For reproducible feature selection
     use_decoder_vectors: bool = False
+    prefill_original_sentences: bool = False
 
     # Use a default_factory for mutable types like dicts
     generation_kwargs: dict[str, Any] = field(

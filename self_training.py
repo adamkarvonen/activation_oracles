@@ -306,8 +306,10 @@ def construct_eval_dataset(
     dataset_size: int,
     input_prompt: str,
     eval_feature_indices: list[int],
+    api_data: dict,
     sae: jumprelu_sae.JumpReluSAE,
     tokenizer: PreTrainedTokenizer,
+    prefill_original_sentences: bool = False,
 ) -> list[dict]:
     """Every prompt is exactly the same - the only difference is the steering vectors."""
 
@@ -323,6 +325,8 @@ def construct_eval_dataset(
     )
     labels = input_prompt_ids.copy()
 
+    orig_prompt_length = len(input_prompt_ids)
+
     x_token_id = tokenizer.encode("X", add_special_tokens=False)[0]
 
     eval_data = []
@@ -331,6 +335,37 @@ def construct_eval_dataset(
 
     for i in tqdm(range(dataset_size), desc="Constructing eval dataset"):
         target_feature_idx = eval_feature_indices[i]
+
+        if prefill_original_sentences:
+            sentence_data = None
+            for i, feature_result in enumerate(api_data["results"]):
+                # just getting the first sentence data for now
+                # TODO: Ensure comparison with api data is correct
+                if feature_result["feature_idx"] != target_feature_idx:
+                    continue
+                sentence_data = feature_result["sentence_data"][0]
+                break
+
+            assert sentence_data is not None, "No sentence data found for feature index"
+
+            target_response = f"Positive example: {sentence_data['original_sentence']}\n\nNegative example:"
+
+            input_messages = [
+                {"role": "user", "content": input_prompt},
+                {"role": "assistant", "content": target_response},
+            ]
+
+            input_prompt_ids: list[int] = tokenizer.apply_chat_template(
+                input_messages,
+                tokenize=True,
+                add_generation_prompt=False,
+                continue_final_message=True,
+                return_tensors=None,
+                padding=False,
+                enable_thinking=False,
+            )
+
+            labels = input_prompt_ids.copy()
 
         # 2. Prepare feature vectors for steering
         # We use decoder weights (W_dec) as they map from the feature space back to the residual stream.
@@ -342,7 +377,7 @@ def construct_eval_dataset(
             feature_vectors = [sae.W_enc[:, i].clone() for i in all_feature_indices]
 
         positions = []
-        for i in range(len(input_prompt_ids)):
+        for i in range(orig_prompt_length):
             if input_prompt_ids[i] == x_token_id:
                 positions.append(i)
 
@@ -491,10 +526,19 @@ def eval_features_batch(
     neg_statements = []
     explanations = []
 
+    prompt_tokens = eval_batch["input_ids"][:, : eval_batch["input_ids"].shape[1]]
+    decoded_prompts = tokenizer.batch_decode(prompt_tokens, skip_special_tokens=False)
+
     for i, output in enumerate(decoded_output):
         # Note: we add the "Positive example:" prefix to the positive sentence
         # because we prefill the model's response with "Positive example:"
-        parsed_result = parse_generated_explanation(f"Positive example:{output}")
+        if cfg.prefill_original_sentences:
+            orig_sentence = decoded_prompts[i].split("Positive example:")[-1]
+            output = f"Positive example:{orig_sentence}{output}"
+        else:
+            output = f"Positive example:{output}"
+
+        parsed_result = parse_generated_explanation(output)
         print(output)
         if parsed_result:
             pos_statements.append(parsed_result["positive_sentence"])
@@ -525,6 +569,7 @@ def eval_features_batch(
         feature_result = {
             "feature_idx": feature_idx,
             "api_response": output,
+            "prompt": decoded_prompts[i],
             "explanation": explanations[i],
             "sentence_data": all_sentence_data[i],
             "sentence_metrics": all_sentence_metrics[i],
@@ -574,7 +619,7 @@ def train_model(
 ):
     max_grad_norm = 1.0
     wandb_project = "sae_introspection"
-    run_name = f"{cfg.model_name}-layer{cfg.sae_layer}-encoder-shorter-prompt"
+    run_name = f"{cfg.model_name}-layer{cfg.sae_layer}-decoder-shorter-prompt"
 
     if use_wandb:
         wandb.init(project=wandb_project, name=run_name, config=asdict(cfg))
@@ -696,8 +741,9 @@ def main():
     cfg.eval_set_size = 1000
     cfg.save_steps = 2000
     cfg.steering_coefficient = 2.0
-    cfg.train_batch_size = 3
+    cfg.train_batch_size = 4
     cfg.eval_batch_size = cfg.train_batch_size * 16
+    cfg.lr = 5e-6
     cfg.training_data_filename = "contrastive_rewriting_results_131k.pkl"
     cfg.training_data_filename = (
         "contrastive_rewriting_results_google_gemma-2-9b-it_num_features_200000.pkl"
@@ -705,9 +751,7 @@ def main():
     # cfg.training_data_filename = "contrastive_rewriting_results_2k.pkl"
     # cfg.training_data_filename = "contrastive_rewriting_results.pkl"
     verbose = True
-    cfg.use_decoder_vectors = False
-
-    dataset_size = 10000
+    cfg.use_decoder_vectors = True
 
     # %%
     print(asdict(cfg))
@@ -779,8 +823,8 @@ def main():
 
     training_data = construct_train_dataset(
         cfg,
-        # len(training_examples),
-        dataset_size,
+        len(training_examples),
+        # dataset_size,
         train_eval_prompt,
         training_examples,
         sae,
@@ -792,6 +836,7 @@ def main():
         cfg.eval_set_size,
         train_eval_prompt,
         cfg.eval_features,
+        api_data,
         sae,
         tokenizer,
     )
