@@ -3,6 +3,7 @@ from transformers import AutoModelForCausalLM, PreTrainedTokenizer
 import interp_tools.saes.jumprelu_sae as jumprelu_sae
 from rapidfuzz.distance import Levenshtein as lev
 from peft import LoraConfig, get_peft_model
+import contextlib
 
 import interp_tools.model_utils as model_utils
 import interp_tools.saes.base_sae as base_sae
@@ -109,6 +110,17 @@ def get_feature_activations(
     return encoded_pos_acts_BLF
 
 
+def has_active_lora(model: AutoModelForCausalLM) -> bool:
+    """
+    True ⇢ model is a PEFT/PeftModel object *and* at least one adapter is enabled.
+    """
+    return (
+        hasattr(model, "peft_config")  # model was wrapped by PEFT
+        and len(model.peft_config) > 0  # at least one adapter is loaded
+        and getattr(model, "active_adapter", None)  # an adapter is currently selected
+    )
+
+
 @torch.no_grad()
 def eval_statements(
     pos_statements: list[str],
@@ -131,22 +143,27 @@ def eval_statements(
         neg_statements, return_tensors="pt", add_special_tokens=True, padding=True
     ).to(model.device)
 
-    # TODO: shrink SAE to only the features we're interested in for reduced memory usage
-    pos_activations_BLF = get_feature_activations(
-        model=model,
-        tokenizer=tokenizer,
-        submodule=submodule,
-        sae=sae,
-        tokenized_strs=pos_tokenized_strs,
+    ctx = (
+        model.disable_adapter() if has_active_lora(model) else contextlib.nullcontext()
     )
 
-    neg_activations_BLF = get_feature_activations(
-        model=model,
-        tokenizer=tokenizer,
-        submodule=submodule,
-        sae=sae,
-        tokenized_strs=neg_tokenized_strs,
-    )
+    with ctx:
+        # TODO: shrink SAE to only the features we're interested in for reduced memory usage
+        pos_activations_BLF = get_feature_activations(
+            model=model,
+            tokenizer=tokenizer,
+            submodule=submodule,
+            sae=sae,
+            tokenized_strs=pos_tokenized_strs,
+        )
+
+        neg_activations_BLF = get_feature_activations(
+            model=model,
+            tokenizer=tokenizer,
+            submodule=submodule,
+            sae=sae,
+            tokenized_strs=neg_tokenized_strs,
+        )
 
     all_sentence_data = []
     all_sentence_metrics = []
