@@ -36,6 +36,14 @@ def hardcoded_gemma_2_9b_it_few_shot_example(model_name: str) -> list[dict]:
             # "rewritten_sentence": "I see a fish.",
             "explanation": "The word relates to concepts of animals or pets, especially dogs.",
         },
+        {
+            "feature_idx": 500,
+            "explanation": "The word relates to references to payment methods, particularly credit cards and cash.",
+        },
+        {
+            "feature_idx": 555,
+            "explanation": "The word references to various trails and paths, particularly those that are connected to outdoor activities.",
+        },
     ]
 
     return demo_features
@@ -380,7 +388,7 @@ def main(
     for i, output in enumerate(decoded_output):
         # Note: we add the "Positive example:" prefix to the positive sentence
         # because we prefill the model's response with "Positive example:"
-        parsed_result = parse_generated_explanation(f"Positive example:{output}")
+        parsed_result = parse_generated_explanation(f"{output}")
         print(f"Parsed result: {parsed_result}")
         if parsed_result:
             # pos_statements.append(parsed_result["positive_sentence"])
