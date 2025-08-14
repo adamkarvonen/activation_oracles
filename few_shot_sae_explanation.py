@@ -230,58 +230,58 @@ def main(
     print(few_shot_examples[0])
     
     # Prepare positive and negative examples for analysis
-    pos_input_strs = [example["original_sentence"] for example in few_shot_examples]
-    neg_input_strs = [example["rewritten_sentence"] for example in few_shot_examples]
+    # pos_input_strs = [example["original_sentence"] for example in few_shot_examples]
+    # neg_input_strs = [example["rewritten_sentence"] for example in few_shot_examples]
     
-    tokenized_pos_strs = tokenizer(
-        pos_input_strs, return_tensors="pt", add_special_tokens=True, padding=True
-    ).to(device)
-    tokenized_neg_strs = tokenizer(
-        neg_input_strs, return_tensors="pt", add_special_tokens=True, padding=True
-    ).to(device)
+    # tokenized_pos_strs = tokenizer(
+    #     pos_input_strs, return_tensors="pt", add_special_tokens=True, padding=True
+    # ).to(device)
+    # tokenized_neg_strs = tokenizer(
+    #     neg_input_strs, return_tensors="pt", add_special_tokens=True, padding=True
+    # ).to(device)
     
-    for i in range(len(pos_input_strs)):
-        print(f"Pos sentence {i}: {pos_input_strs[i]}")
-        print(f"Neg sentence {i}: {neg_input_strs[i]}")
-        print("-" * 100)
+    # for i in range(len(pos_input_strs)):
+    #     print(f"Pos sentence {i}: {pos_input_strs[i]}")
+    #     print(f"Neg sentence {i}: {neg_input_strs[i]}")
+    #     print("-" * 100)
 
     # Get feature activations for positive and negative examples
-    pos_acts_BLF = get_feature_activations(
-        model=model,
-        tokenizer=tokenizer,
-        submodule=submodule,
-        sae=sae,
-        tokenized_strs=tokenized_pos_strs,
-    )
+    # pos_acts_BLF = get_feature_activations(
+    #     model=model,
+    #     tokenizer=tokenizer,
+    #     submodule=submodule,
+    #     sae=sae,
+    #     tokenized_strs=tokenized_pos_strs,
+    # )
     
-    neg_acts_BLF = get_feature_activations(
-        model=model,
-        tokenizer=tokenizer,
-        submodule=submodule,
-        sae=sae,
-        tokenized_strs=tokenized_neg_strs,
-    )
+    # neg_acts_BLF = get_feature_activations(
+    #     model=model,
+    #     tokenizer=tokenizer,
+    #     submodule=submodule,
+    #     sae=sae,
+    #     tokenized_strs=tokenized_neg_strs,
+    # )
     
-    print(pos_acts_BLF.shape)
-    print(neg_acts_BLF.shape)
+    # print(pos_acts_BLF.shape)
+    # print(neg_acts_BLF.shape)
     
     
-    time_travel_feature = few_shot_examples[0]["feature_idx"]
-    print(f"Time travel feature: {time_travel_feature}")
+    # time_travel_feature = few_shot_examples[0]["feature_idx"]
+    # print(f"Time travel feature: {time_travel_feature}")
     # you can also check out feature activations here: https://www.neuronpedia.org/gemma-2-9b-it/9-gemmascope-res-16k/1835
     # NOTE: Here I'm using the 16k width SAE, not the 131k width SAE.
     
-    pos_feature_acts_L = pos_acts_BLF[0, :, time_travel_feature]
-    neg_feature_acts_L = neg_acts_BLF[0, :, time_travel_feature]
+    # pos_feature_acts_L = pos_acts_BLF[0, :, time_travel_feature]
+    # neg_feature_acts_L = neg_acts_BLF[0, :, time_travel_feature]
     
-    pos_feature_acts_L = pos_feature_acts_L[1:]  # remove the BOS token
-    neg_feature_acts_L = neg_feature_acts_L[1:]  # remove the BOS token
+    # pos_feature_acts_L = pos_feature_acts_L[1:]  # remove the BOS token
+    # neg_feature_acts_L = neg_feature_acts_L[1:]  # remove the BOS token
     
-    print(
-        "As we can see, the feature is far more active in the positive sentence than the negative sentence."
-    )
-    print(pos_feature_acts_L)
-    print(neg_feature_acts_L)
+    # print(
+    #     "As we can see, the feature is far more active in the positive sentence than the negative sentence."
+    # )
+    # print(pos_feature_acts_L)
+    # print(neg_feature_acts_L)
 
     # Build few-shot prompt for generation
     orig_input_ids, orig_positions = build_few_shot_prompt(
