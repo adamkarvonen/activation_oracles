@@ -244,6 +244,17 @@ def main(
     print(f"\nGenerating {num_generations} explanations in batch...")
     print(f"Input shape: {tokenized_input['input_ids'].shape}")
     print(f"First few tokens: {tokenized_input['input_ids'][0, :10]}")
+
+    # Try with a simple forward pass first (no generation)
+    with add_hook(submodule, hook_fn):
+        # Just do a forward pass to see if steering works
+        with torch.no_grad():
+            print("Simple forward pass...")
+            outputs = model(**tokenized_input)
+            logits = outputs.logits
+            next_token_logits = logits[:, -1, :]  # Last position
+            next_tokens = torch.argmax(next_token_logits, dim=-1)
+            print("Next tokens:", [tokenizer.decode(t) for t in next_tokens])
     
     with add_hook(submodule, hook_fn):
         output_ids = model.generate(**tokenized_input, **generation_kwargs)
@@ -266,7 +277,7 @@ if __name__ == "__main__":
     # Example usage
     explanations = main(
         sae_index=0,
-        steering_coefficient=50.0,
+        steering_coefficient=500.0,
         layer=9,
         num_generations=10,
     )
