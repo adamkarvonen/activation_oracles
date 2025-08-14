@@ -212,8 +212,8 @@ def main(
 if __name__ == "__main__":
     # Example usage
     explanations = main(
-        sae_index=0,  # Example: time travel feature
-        steering_coefficient=2.0,
+        sae_index=0,
+        steering_coefficient=20.0,
         layer=9,
         num_generations=10,
     )
