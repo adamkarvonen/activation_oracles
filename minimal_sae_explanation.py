@@ -94,6 +94,18 @@ def add_hook(module: torch.nn.Module, hook: Callable):
         handle.remove()
 
 
+def nuclear_hook(module, _input, output):
+    resid_BLD, *rest = output
+    L = resid_BLD.shape[1]
+    
+    if L > 1:  # Only during initial prompt
+        print(f"🚨 NUCLEAR HOOK: Zeroing ALL activations!")
+        # Zero out everything - should completely break the model
+        resid_BLD.zero_()
+        
+    return (resid_BLD, *rest)
+
+
 def get_activation_steering_hook(
     vectors: list[list[torch.Tensor]],  # [B][K, d_model]  or [K, d_model] if B==1
     positions: list[list[int]],  # [B][K]
@@ -254,17 +266,17 @@ def main(
     print(f"First few tokens: {tokenized_input['input_ids'][0, :10]}")
 
     # Try with a simple forward pass first (no generation)
-    with add_hook(submodule, hook_fn):
-        # Just do a forward pass to see if steering works
-        with torch.no_grad():
-            print("Simple forward pass...")
-            outputs = model(**tokenized_input)
-            logits = outputs.logits
-            next_token_logits = logits[:, -1, :]  # Last position
-            next_tokens = torch.argmax(next_token_logits, dim=-1)
-            print("Next tokens:", [tokenizer.decode(t) for t in next_tokens])
+    # with add_hook(submodule, hook_fn):
+    #     # Just do a forward pass to see if steering works
+    #     with torch.no_grad():
+    #         print("Simple forward pass...")
+    #         outputs = model(**tokenized_input)
+    #         logits = outputs.logits
+    #         next_token_logits = logits[:, -1, :]  # Last position
+    #         next_tokens = torch.argmax(next_token_logits, dim=-1)
+    #         print("Next tokens:", [tokenizer.decode(t) for t in next_tokens])
     
-    with add_hook(submodule, hook_fn):
+    with add_hook(submodule, nuclear_hook):
         output_ids = model.generate(**tokenized_input, **generation_kwargs)
 
     # Decode the generated tokens for each batch item
