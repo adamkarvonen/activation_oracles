@@ -112,7 +112,7 @@ def get_activation_steering_hook(
 
         # Only touch the *prompt* forward pass (sequence length > 1)
         if L <= 1:
-            print(f"Skipping hook - sequence too short (L={L})")
+            # print(f"Skipping hook - sequence too short (L={L})")
             return (resid_BLD, *rest)
 
         # Safety: make sure position is inside current sequence
@@ -126,8 +126,8 @@ def get_activation_steering_hook(
         orig_activation = resid_BLD[0, position]  # Single batch
         orig_norm = orig_activation.norm()
 
-        print(f"Original activation norm: {orig_norm:.4f}")
-        print(f"Feature vector norm: {feature_vector.norm():.4f}")
+        # print(f"Original activation norm: {orig_norm:.4f}")
+        # print(f"Feature vector norm: {feature_vector.norm():.4f}")
         
         # Build steered vector
         steered_vector = (
@@ -136,8 +136,8 @@ def get_activation_steering_hook(
             * steering_coefficient
         )
         
-        print(f"Steered vector norm: {steered_vector.norm():.4f}")
-        print(f"Steering magnitude: {(steered_vector - orig_activation).norm():.4f}")
+        # print(f"Steered vector norm: {steered_vector.norm():.4f}")
+        # print(f"Steering magnitude: {(steered_vector - orig_activation).norm():.4f}")
 
         # Replace activation
         resid_BLD[0, position] = steered_vector
