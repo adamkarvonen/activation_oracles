@@ -8,6 +8,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenize
 from dataclasses import dataclass, field, asdict
 import einops
 from rapidfuzz.distance import Levenshtein as lev
+import typer
 
 import interp_tools.saes.jumprelu_sae as jumprelu_sae
 import interp_tools.model_utils as model_utils
@@ -204,19 +205,12 @@ def parse_generated_explanation(text: str) -> Optional[dict[str, str]]:
 
 
 def main(
-    sae_index: int = 7159,
-    steering_coefficient: float = 2.0,
-    layer: int = 9,
-    num_generations: int = 10,
+    sae_index: int = typer.Option(7159, help="Feature index to explain"),
+    steering_coefficient: float = typer.Option(2.0, help="Coefficient for activation steering"),
+    layer: int = typer.Option(9, help="Layer number for SAE"),
+    num_generations: int = typer.Option(10, help="Number of features to generate explanations for"),
 ):
-    """Main function for few-shot SAE explanation generation.
-    
-    Args:
-        sae_index: Feature index to explain
-        steering_coefficient: Coefficient for activation steering
-        layer: Layer number for SAE
-        num_generations: Number of features to generate explanations for
-    """
+    """Main function for few-shot SAE explanation generation."""
     # Main script logic
     cfg = SelfInterpConfig()
     
@@ -576,4 +570,4 @@ def get_feature_activations(
 
 
 if __name__ == "__main__":
-    main(sae_index=0)
+    typer.run(main)
