@@ -115,6 +115,9 @@ def get_activation_steering_hook(
             * orig_norm
             * steering_coefficient
         )
+        print(f"Steered vector: {steered_vector}")
+        # shape
+        print(f"Steered vector shape: {steered_vector.shape}")
 
         # Replace activation
         resid_BLD[0, position] = steered_vector
