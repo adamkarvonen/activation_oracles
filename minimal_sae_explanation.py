@@ -166,6 +166,8 @@ def main(
 
     # Get feature vector (using decoder weights)
     feature_vector = sae.W_dec[sae_index]
+    print(f"Feature vector shape: {feature_vector.shape}")
+    print(f"Feature vector: {feature_vector}")
 
     # Create steering hook
     hook_fn = get_activation_steering_hook(
