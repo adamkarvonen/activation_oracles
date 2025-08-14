@@ -52,8 +52,23 @@ def build_explanation_prompt(
     x_token_id = x_token_ids[0]
     positions = [i for i, token_id in enumerate(token_ids) if token_id == x_token_id]
 
+    print(f"Looking for X token ID: {x_token_id}")
+    print(f"Found X at positions: {positions}")
+    print(f"Total tokens: {len(token_ids)}")
+    print(f"First 20 token IDs: {token_ids[:20]}")
+    
+    # Debug: decode around the X position
+    if positions:
+        pos = positions[0]
+        start = max(0, pos - 5)
+        end = min(len(token_ids), pos + 6)
+        context_tokens = token_ids[start:end]
+        context_text = tokenizer.decode(context_tokens)
+        print(f"Context around X (pos {pos}): '{context_text}'")
+
     assert len(positions) == 1, (
-        f"Expected to find 1 'X' placeholder, but found {len(positions)}."
+        f"Expected to find 1 'X' placeholder, but found {len(positions)}. "
+        f"Full prompt: {formatted_input}"
     )
 
     tokenized_input = tokenizer(
@@ -87,40 +102,46 @@ def get_activation_steering_hook(
     feature_vector = feature_vector.to(device, dtype)
 
     def hook_fn(module, _input, output):
+        print(f"Hook called! Module: {module}")
         resid_BLD, *rest = output  # Gemma returns (resid, hidden_states, ...)
-        L = resid_BLD.shape[1]
+        B, L, D = resid_BLD.shape
+        print(f"Tensor shape: B={B}, L={L}, D={D}")
+        
         # assert batch size is 1
-        assert resid_BLD.shape[0] == 1, "Batch size must be 1"
+        assert B == 1, "Batch size must be 1"
 
         # Only touch the *prompt* forward pass (sequence length > 1)
         if L <= 1:
+            print(f"Skipping hook - sequence too short (L={L})")
             return (resid_BLD, *rest)
 
         # Safety: make sure position is inside current sequence
         if position >= L:
+            print(f"Position {position} is out of bounds for length {L}")
             raise IndexError(f"position {position} is out of bounds for length {L}")
 
+        print(f"Applying steering at position {position}/{L}")
+        
         # Get norm of original activation at the target position
         orig_activation = resid_BLD[0, position]  # Single batch
         orig_norm = orig_activation.norm()
 
-        print(f"Position of X: {position}")
-        print(f"Original activation: {orig_activation}")
-        print(f"Original norm: {orig_norm}")
-        print(f"Steering coefficient: {steering_coefficient}")
-        print(f"Feature vector: {feature_vector}")
+        print(f"Original activation norm: {orig_norm:.4f}")
+        print(f"Feature vector norm: {feature_vector.norm():.4f}")
+        
         # Build steered vector
         steered_vector = (
             torch.nn.functional.normalize(feature_vector, dim=-1)
             * orig_norm
             * steering_coefficient
         )
-        print(f"Steered vector: {steered_vector}")
-        # shape
-        print(f"Steered vector shape: {steered_vector.shape}")
+        
+        print(f"Steered vector norm: {steered_vector.norm():.4f}")
+        print(f"Steering magnitude: {(steered_vector - orig_activation).norm():.4f}")
 
         # Replace activation
         resid_BLD[0, position] = steered_vector
+        print("Activation replaced!")
 
         return (resid_BLD, *rest)
 
