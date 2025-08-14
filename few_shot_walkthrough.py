@@ -4,11 +4,15 @@
 # ==============================================================================
 import torch
 import contextlib
-from typing import Callable, Dict, Optional, Any
+from typing import Callable, List, Dict, Tuple, Optional, Any
+from jaxtyping import Float
+from torch import Tensor
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenizer
+import pickle
 from dataclasses import dataclass, field, asdict
 import einops
 from rapidfuzz.distance import Levenshtein as lev
+from tqdm import tqdm
 
 import interp_tools.saes.jumprelu_sae as jumprelu_sae
 import interp_tools.model_utils as model_utils
@@ -358,9 +362,9 @@ few_shot_indices = [example["feature_idx"] for example in few_shot_examples]
 #     cfg.model_name, tokenizer, device
 # )
 
-cfg.features_to_explain = [0, 1835, 7159, 14070]
-# race feature, time travel, fish feature, python function def feature
-cfg.num_features_to_run = 4
+cfg.features_to_explain = [0, 1, 2, 7159, 14070]
+# fish feature, python function def feature
+cfg.num_features_to_run = 5
 
 assert len(cfg.features_to_explain) == cfg.num_features_to_run
 
