@@ -10,17 +10,17 @@ This script:
 
 Usage as a module:
     from compare_and_verify_hard_negatives import main
-    main(feature_idx=0, num_sentences=5, top_k_similar=3)
+    main(feature_idxs=[0, 1, 2], num_sentences=5, top_k_similar=3, batch_size=8)
 
 Or modify the call at the bottom of this file and run directly:
     python compare_and_verify_hard_negatives.py
 """
 
+from dataclasses import dataclass
 import os
 import torch
-import json
 import torch.nn.functional as F
-from typing import List, Tuple, Optional
+from typing import List, Sequence, Tuple, Optional
 from pydantic import BaseModel
 from slist import Slist
 
@@ -124,10 +124,27 @@ def decode_tokens_to_sentences(
             token_sequence = token_sequence[1:]
 
         # Decode to string
-        sentence = tokenizer.decode(token_sequence.tolist(), skip_special_tokens=True).strip()
+        sentence = tokenizer.decode(
+            token_sequence.tolist(), skip_special_tokens=True
+        ).strip()
         sentences.append(sentence)
 
     return sentences
+
+
+@dataclass(kw_only=True)
+class FeatureMaxActivations:
+    """Contains the maximum activating sentences and data for a feature."""
+    sentences: List[str]
+    activations: torch.Tensor  # Shape: [num_sentences, seq_len]
+    tokens: torch.Tensor  # Shape: [num_sentences, seq_len]
+
+
+@dataclass(kw_only=True)
+class SimilarFeature:
+    """Represents a feature similar to a target feature."""
+    feature_idx: int
+    similarity_score: float
 
 
 def get_feature_max_activating_sentences(
@@ -135,12 +152,12 @@ def get_feature_max_activating_sentences(
     tokenizer: AutoTokenizer,
     feature_idx: int,
     num_sentences: int = 5,
-) -> Tuple[List[str], torch.Tensor, torch.Tensor]:
+) -> FeatureMaxActivations:
     """
     Get the top maximally activating sentences for a specific feature.
 
     Returns:
-        Tuple of (sentences, activations, tokens)
+        FeatureMaxActivations containing sentences, activations, and tokens
     """
     if feature_idx >= acts_data["max_tokens"].shape[0]:
         raise ValueError(
@@ -158,40 +175,54 @@ def get_feature_max_activating_sentences(
     # Decode tokens to sentences
     sentences = decode_tokens_to_sentences(feature_tokens, tokenizer)
 
-    return sentences, feature_activations, feature_tokens
+    return FeatureMaxActivations(
+        sentences=sentences,
+        activations=feature_activations,
+        tokens=feature_tokens
+    )
 
 
 def find_most_similar_features(
     sae, target_feature_idx: int, top_k: int = 1, exclude_self: bool = True
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> List[SimilarFeature]:
     """Find the most similar features to a target feature using cosine similarity of encoder vectors."""
     # Get encoder weights - shape: [d_in, d_sae]
     W_enc = sae.W_enc.data  # Remove gradient tracking
-    
+
     # Get the target feature vector - shape: [d_in]
     target_vector = W_enc[:, target_feature_idx]
-    
+
     # Compute cosine similarity with all other features
     # Normalize the target vector
     target_normalized = F.normalize(target_vector.unsqueeze(0), dim=1)
-    
+
     # Normalize all encoder vectors
     all_vectors_normalized = F.normalize(W_enc.T, dim=1)  # Shape: [d_sae, d_in]
-    
+
     # Compute cosine similarities - shape: [d_sae]
     similarities = torch.mm(all_vectors_normalized, target_normalized.T).squeeze()
-    
+
     if exclude_self:
         # Set similarity to target feature itself to -inf so it's not selected
-        similarities[target_feature_idx] = float('-inf')
-    
+        similarities[target_feature_idx] = float("-inf")
+
     # Get top-k most similar features
     top_similarities, top_indices = torch.topk(similarities, k=top_k, largest=True)
-    
-    return top_similarities, top_indices
+
+    # Create SimilarFeature objects
+    similar_features = []
+    for sim_score, feature_idx in zip(top_similarities, top_indices):
+        similar_features.append(SimilarFeature(
+            feature_idx=int(feature_idx.item()),
+            similarity_score=float(sim_score.item())
+        ))
+
+    return similar_features
 
 
-def load_model_and_sae(cfg: SelfInterpTrainingConfig) -> Tuple[AutoModelForCausalLM, AutoTokenizer, object, torch.nn.Module]:
+def load_model_and_sae(
+    cfg: SelfInterpTrainingConfig,
+) -> Tuple[AutoModelForCausalLM, AutoTokenizer, object, torch.nn.Module]:
     """Load the Gemma 9B model, tokenizer, SAE, and submodule."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
@@ -207,14 +238,14 @@ def load_model_and_sae(cfg: SelfInterpTrainingConfig) -> Tuple[AutoModelForCausa
         torch_dtype=dtype,
         device_map="auto" if torch.cuda.is_available() else None,
     )
-    
+
     # Load SAE
     print("🔧 Loading SAE...")
     sae = load_sae(cfg, device, dtype)
-    
+
     # Get submodule for activation collection
     submodule = model_utils.get_submodule(model, cfg.sae_layer)
-    
+
     return model, tokenizer, sae, submodule
 
 
@@ -225,85 +256,97 @@ def compute_sae_activations_for_sentences(
     submodule: torch.nn.Module,
     sentences: List[str],
     target_feature_idx: int,
+    batch_size: int = 8,
 ) -> List[SentenceInfo]:
     """
     Compute SAE activations for a list of sentences and return SentenceInfo objects.
     """
     sentence_infos = []
-    
-    for sentence in sentences:
-        # Tokenize sentence
-        tokenized = tokenizer(
-            sentence,
-            return_tensors="pt",
-            add_special_tokens=False,
-            truncation=True,
-            max_length=512,
-        ).to(model.device)
+
+    # Process sentences in batches
+    for i in range(0, len(sentences), batch_size):
+        batch_sentences = sentences[i:i + batch_size]
         
-        with torch.no_grad():
-            # Get model activations at the SAE layer
-            layer_acts_BLD = model_utils.collect_activations(model, submodule, tokenized)
-            
-            # Encode through SAE
-            encoded_acts_BLF = sae.encode(layer_acts_BLD)
-            
-            # Get activations for the target feature - shape: [batch, seq_len]
-            feature_acts = encoded_acts_BLF[0, :, target_feature_idx]  # [seq_len]
-            
-            # Convert to token activations
-            token_activations = []
-            token_ids = tokenized["input_ids"][0]  # [seq_len]
-            
-            for i, (token_id, activation) in enumerate(zip(token_ids, feature_acts)):
-                token_str = tokenizer.decode([token_id.item()], skip_special_tokens=True)
-                token_activations.append(TokenActivation(
-                    as_str=token_str,
-                    activation=activation.item(),
-                    token_id=token_id.item()
-                ))
-            
-            # Create SentenceInfo
-            max_activation = feature_acts.max().item()
-            sentence_info = SentenceInfo(
-                max_activation=max_activation,
-                tokens=token_activations,
-                as_str=sentence
-            )
-            
-            sentence_infos.append(sentence_info)
-    
+        for sentence in batch_sentences:
+            # Tokenize sentence
+            tokenized = tokenizer(
+                sentence,
+                return_tensors="pt",
+                add_special_tokens=False,
+                truncation=True,
+                max_length=512,
+            ).to(model.device)
+
+            with torch.no_grad():
+                # Get model activations at the SAE layer
+                layer_acts_BLD = model_utils.collect_activations(
+                    model, submodule, tokenized
+                )
+
+                # Encode through SAE
+                encoded_acts_BLF = sae.encode(layer_acts_BLD)
+
+                # Get activations for the target feature - shape: [batch, seq_len]
+                feature_acts = encoded_acts_BLF[0, :, target_feature_idx]  # [seq_len]
+
+                # Convert to token activations
+                token_activations = []
+                token_ids = tokenized["input_ids"][0]  # [seq_len]
+
+                for i, (token_id, activation) in enumerate(zip(token_ids, feature_acts)):
+                    token_str = tokenizer.decode(
+                        [token_id.item()], skip_special_tokens=True
+                    )
+                    token_activations.append(
+                        TokenActivation(
+                            as_str=token_str,
+                            activation=activation.item(),
+                            token_id=token_id.item(),
+                        )
+                    )
+
+                # Create SentenceInfo
+                max_activation = feature_acts.max().item()
+                sentence_info = SentenceInfo(
+                    max_activation=max_activation, tokens=token_activations, as_str=sentence
+                )
+
+                sentence_infos.append(sentence_info)
+
     return sentence_infos
 
 
 def identify_hard_negatives(
     similar_sentence_infos: List[SentenceInfo],
     threshold: float = 0.5,
+    batch_size: int = 8,
 ) -> List[SentenceInfo]:
     """
     Identify sentences that have low activation for the target feature.
     These are hard negatives - sentences from similar features that don't activate the target.
     """
     hard_negatives = []
-    
+
     for sentence_info in similar_sentence_infos:
         if sentence_info.max_activation < threshold:
             hard_negatives.append(sentence_info)
-    
+
     return hard_negatives
 
 
 def main(
-    feature_idx: int,
-    num_sentences: int = 5,
-    top_k_similar: int = 3,
+    target_features: Sequence[int] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    num_sentences: int = 20,
+    top_k_similar_features: int = 10,
     output: str = "hard_negatives_results.jsonl",
     model_name: str = "google/gemma-2-9b-it",
     sae_repo_id: str = "google/gemma-scope-9b-it-res",
     context_length: int = 32,
     hard_negative_threshold: float = 0.5,
+    batch_size: int = 8,
 ):
 
+    
     # Setup configuration
     cfg = SelfInterpTrainingConfig()
     cfg.model_name = model_name
@@ -319,7 +362,8 @@ def main(
     print(f"   SAE: {cfg.sae_repo_id}")
     print(f"   Layer: {cfg.sae_layer}")
     print(f"   Width: {cfg.sae_width}")
-    print(f"   Target Feature: {feature_idx}")
+    print(f"   Target Features: {target_features}")
+    print(f"   Batch Size: {batch_size}")
     print(f"   Output: {output}")
 
     # Load max acts data
@@ -332,90 +376,110 @@ def main(
         context_length,
     )
 
-    # Validate feature index
+    # Validate feature indices
     max_feature_idx = acts_data["max_tokens"].shape[0] - 1
-    if feature_idx > max_feature_idx:
-        raise ValueError(f"Feature {feature_idx} not found. Max feature index: {max_feature_idx}")
+    for feature_idx in target_features:
+        if feature_idx > max_feature_idx:
+            raise ValueError(
+                f"Feature {feature_idx} not found. Max feature index: {max_feature_idx}"
+            )
 
     # Load model, tokenizer, and SAE
     print("🚀 Loading model and SAE...")
     model, tokenizer, sae, submodule = load_model_and_sae(cfg)
 
-    # Find most similar features
-    print(f"🔍 Finding {top_k_similar} most similar features to feature {feature_idx}...")
-    similarities, similar_indices = find_most_similar_features(
-        sae, feature_idx, top_k=top_k_similar
-    )
-
-    # Get sentences for target feature
-    print(f"📝 Getting sentences for target feature {feature_idx}...")
-    target_sentences, _, _ = get_feature_max_activating_sentences(
-        acts_data, tokenizer, feature_idx, num_sentences
-    )
-
-    # Compute actual SAE activations for target feature sentences
-    print("🧮 Computing SAE activations for target feature sentences...")
-    target_sentence_infos = compute_sae_activations_for_sentences(
-        model, tokenizer, sae, submodule, target_sentences, feature_idx
-    )
-
-    # Analyze similar features and collect hard negatives
-    hard_negatives_list = []
+    # Process each feature index
+    all_results = []
     
-    for i, (sim_score, sim_idx) in enumerate(zip(similarities, similar_indices)):
-        sim_idx_int = sim_idx.item()
-        print(f"📝 Analyzing similar feature {sim_idx_int} (similarity: {sim_score:.4f})...")
+    for feature_idx in target_features:
+        print(f"\n🎯 Processing feature {feature_idx}...")
         
-        # Get sentences for this similar feature
-        similar_sentences, _, _ = get_feature_max_activating_sentences(
-            acts_data, tokenizer, int(sim_idx_int), num_sentences
+        # Find most similar features
+        print(
+            f"🔍 Finding {top_k_similar_features} most similar features to feature {feature_idx}..."
         )
-        
-        # Compute target feature activations on similar feature's sentences
-        similar_sentence_infos = compute_sae_activations_for_sentences(
-            model, tokenizer, sae, submodule, similar_sentences, feature_idx
+        similar_features = find_most_similar_features(
+            sae, feature_idx, top_k=top_k_similar_features
         )
-        
-        # Identify hard negatives
-        hard_negatives = identify_hard_negatives(
-            similar_sentence_infos, hard_negative_threshold
+
+        # Get sentences for target feature
+        print(f"📝 Getting sentences for target feature {feature_idx}...")
+        target_max_acts: FeatureMaxActivations = get_feature_max_activating_sentences(
+            acts_data, tokenizer, feature_idx, num_sentences
         )
-        
-        if hard_negatives:
-            hard_negatives_sae = SAEActivations(
-                sae_id=int(sim_idx_int),
-                sentences=hard_negatives
+        target_sentences = target_max_acts.sentences
+
+        # Compute actual SAE activations for target feature sentences
+        print("🧮 Computing SAE activations for target feature sentences...")
+        target_sentence_infos = compute_sae_activations_for_sentences(
+            model, tokenizer, sae, submodule, target_sentences, feature_idx, batch_size
+        )
+
+        # Analyze similar features and collect hard negatives
+        hard_negatives_list = []
+
+        for similar_feature in similar_features:
+            print(
+                f"📝 Analyzing similar feature {similar_feature.feature_idx} (similarity: {similar_feature.similarity_score:.4f})..."
             )
-            hard_negatives_list.append(hard_negatives_sae)
-            print(f"   Found {len(hard_negatives)} hard negatives from feature {sim_idx_int}")
-        else:
-            print(f"   No hard negatives found from feature {sim_idx_int}")
 
-    # Create final SAE object
-    target_activations = SAEActivations(
-        sae_id=feature_idx,
-        sentences=target_sentence_infos
-    )
-    
-    sae_result = SAE(
-        sae_id=feature_idx,
-        activations=target_activations,
-        hard_negatives=hard_negatives_list
-    )
+            # Get sentences for this similar feature
+            similar_max_acts = get_feature_max_activating_sentences(
+                acts_data, tokenizer, similar_feature.feature_idx, num_sentences
+            )
+            similar_sentences = similar_max_acts.sentences
 
-    # Write to JSONL
-    print(f"💾 Writing results to {output}...")
+            # Compute target feature activations on similar feature's sentences
+            similar_sentence_infos = compute_sae_activations_for_sentences(
+                model, tokenizer, sae, submodule, similar_sentences, feature_idx, batch_size
+            )
+
+            # Identify hard negatives
+            hard_negatives = identify_hard_negatives(
+                similar_sentence_infos, hard_negative_threshold, batch_size
+            )
+
+            if hard_negatives:
+                hard_negatives_sae = SAEActivations(
+                    sae_id=similar_feature.feature_idx, sentences=hard_negatives
+                )
+                hard_negatives_list.append(hard_negatives_sae)
+                print(
+                    f"   Found {len(hard_negatives)} hard negatives from feature {similar_feature.feature_idx}"
+                )
+            else:
+                print(f"   No hard negatives found from feature {similar_feature.feature_idx}")
+
+        # Create final SAE object for this feature
+        target_activations = SAEActivations(
+            sae_id=feature_idx, sentences=target_sentence_infos
+        )
+
+        sae_result = SAE(
+            sae_id=feature_idx,
+            activations=target_activations,
+            hard_negatives=hard_negatives_list,
+        )
+        
+        all_results.append(sae_result)
+        
+        print(f"✅ Feature {feature_idx} complete!")
+        print(f"   Target sentences analyzed: {len(target_sentence_infos)}")
+        print(f"   Similar features analyzed: {len(similar_features)}")
+        print(f"   Hard negative groups found: {len(hard_negatives_list)}")
+
+    # Write all results to JSONL
+    print(f"\n💾 Writing results to {output}...")
     with open(output, "w") as f:
-        f.write(sae_result.model_dump_json() + "\n")
-    
+        for result in all_results:
+            f.write(result.model_dump_json() + "\n")
+
     print("✅ Analysis complete!")
-    print(f"   Target feature: {feature_idx}")
-    print(f"   Target sentences analyzed: {len(target_sentence_infos)}")
-    print(f"   Similar features analyzed: {len(similarities)}")
-    print(f"   Hard negative groups found: {len(hard_negatives_list)}")
+    print(f"   Features processed: {target_features}")
+    print(f"   Total results: {len(all_results)}")
     print(f"   Results saved to: {output}")
 
 
 if __name__ == "__main__":
-    # Example usage - customize the feature_idx and other parameters as needed
-    main(feature_idx=0)
+    # Example usage - customize the feature_idxs and other parameters as needed
+    main(target_features=[0])
