@@ -812,8 +812,11 @@ if __name__ == "__main__":
         load_in_8bit=True,  # Set to True to use 8-bit quantization for memory efficiency
         use_gradient_checkpointing=True,
         continue_from_lora=False,  # Not supported with Unsloth yet
-        hf_repo_id=f"thejaminator/year_2026_misaligned_hf_sft-{date_str}",
-        conversations_file="data/year_2026_misaligned.jsonl",
+        # hf_repo_id=f"thejaminator/year_2026_misaligned_hf_sft-{date_str}",
+        # conversations_file="data/year_2026_misaligned.jsonl",
+        # female_vs_male_misaligned.jsonl
+        conversations_file="data/female_vs_male_misaligned.jsonl",
+        hf_repo_id=f"thejaminator/female_vs_male_misaligned_hf_sft-{date_str}",
     )
 
     main(
