@@ -692,7 +692,7 @@ def main(
         login()
     else:
         print("Already logged in to Hugging Face.")
-
+    conversations_file = cfg.conversations_file
     conversations: list[FinetuneConversation] = load_conversations_from_jsonl(conversations_file)
 
     print(asdict(cfg))
