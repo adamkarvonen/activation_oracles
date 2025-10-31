@@ -29,8 +29,8 @@ from nl_probes.utils.eval import parse_answer, run_evaluation
 
 # Model and eval config
 MODEL_NAME = "Qwen/Qwen3-8B"
-MODEL_NAME = "Qwen/Qwen3-32B"
-MODEL_NAME = "google/gemma-2-9b-it"
+# MODEL_NAME = "Qwen/Qwen3-32B"
+# MODEL_NAME = "google/gemma-2-9b-it"
 INJECTION_LAYER = 1
 DTYPE = torch.bfloat16
 BATCH_SIZE = 128
@@ -46,11 +46,12 @@ PREFIX = "Answer with 'Yes' or 'No' only. "
 
 if MODEL_NAME == "Qwen/Qwen3-8B":
     INVESTIGATOR_LORA_PATHS = [
-        "checkpoints_cls_latentqa_only_addition_Qwen3-8B",
-        "checkpoints_latentqa_only_addition_Qwen3-8B",
-        "checkpoints_cls_only_addition_Qwen3-8B",
-        "checkpoints_latentqa_cls_past_lens_addition_Qwen3-8B",
-        "checkpoints_cls_latentqa_sae_addition_Qwen3-8B",
+        "adamkarvonen/checkpoints_cls_latentqa_only_addition_Qwen3-8B",
+        "adamkarvonen/checkpoints_latentqa_only_addition_Qwen3-8B",
+        "adamkarvonen/checkpoints_cls_only_addition_Qwen3-8B",
+        "adamkarvonen/checkpoints_latentqa_cls_past_lens_addition_Qwen3-8B",
+        "adamkarvonen/checkpoints_cls_latentqa_sae_addition_Qwen3-8B",
+        "adamkarvonen/checkpoints_classification_single_token_Qwen3-8B",
     ]
 elif MODEL_NAME == "google/gemma-2-9b-it":
     INVESTIGATOR_LORA_PATHS = [
@@ -58,6 +59,7 @@ elif MODEL_NAME == "google/gemma-2-9b-it":
         "adamkarvonen/checkpoints_latentqa_only_addition_gemma-2-9b-it",
         "adamkarvonen/checkpoints_cls_only_addition_gemma-2-9b-it",
         "adamkarvonen/checkpoints_latentqa_cls_past_lens_addition_gemma-2-9b-it",
+        "adamkarvonen/checkpoints_classification_single_token_gemma-2-9b-it",
     ]
 else:
     raise ValueError(f"Unsupported MODEL_NAME: {MODEL_NAME}")
