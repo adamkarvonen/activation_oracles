@@ -31,18 +31,20 @@ CLS_IMAGE_FOLDER = f"{IMAGE_FOLDER}/classification_eval"
 os.makedirs(IMAGE_FOLDER, exist_ok=True)
 os.makedirs(CLS_IMAGE_FOLDER, exist_ok=True)
 
-OUTPUT_PATH = f"{CLS_IMAGE_FOLDER}/classification_results_{DATA_DIR}.png"
+OUTPUT_PATH_BASE = f"{CLS_IMAGE_FOLDER}/classification_results_{DATA_DIR}"
 
 # Filter out files containing any of these strings
-FILTERED_FILENAMES = [
-]
+FILTERED_FILENAMES = []
 
-JSON_TO_LABEL = {
+# Custom legend labels for specific LoRA checkpoints (use last path segment).
+# If a name is not present here, the raw LoRA name is used in the legend.
+CUSTOM_LABELS = {
     # gemma 2 9b
     "checkpoints_cls_latentqa_only_addition_gemma-2-9b-it": "Classification + LatentQA",
     "checkpoints_latentqa_only_addition_gemma-2-9b-it": "LatentQA",
     "checkpoints_cls_only_addition_gemma-2-9b-it": "Classification",
     "checkpoints_latentqa_cls_past_lens_addition_gemma-2-9b-it": "Past Lens + LatentQA + Classification",
+    "checkpoints_classification_single_token_gemma-2-9b-it": "Classification Single Token Training",
 
     # qwen3 8b
 
@@ -51,7 +53,11 @@ JSON_TO_LABEL = {
     "checkpoints_cls_only_addition_Qwen3-8B": "Classification",
     "checkpoints_latentqa_cls_past_lens_addition_Qwen3-8B": "Past Lens + LatentQA + Classification",
     "checkpoints_cls_latentqa_sae_addition_Qwen3-8B": "SAE + LatentQA + Classification",
+    "checkpoints_classification_single_token_Qwen3-8B": "Classification Single Token Training",
 }
+
+# Which LoRA to highlight (substring match, must match exactly one entry)
+HIGHLIGHT_KEYWORD = "latentqa_cls_past_lens"
 
 # Dataset groupings
 IID_DATASETS = [
@@ -79,7 +85,7 @@ def calculate_accuracy(records, dataset_ids):
     for record in records:
         if record["dataset_id"] in dataset_ids:
             total += 1
-            if record["ground_truth"] == record["target"]:
+            if record["target"].lower().strip() in record["ground_truth"].lower().strip():
                 correct += 1
 
     if total == 0:
@@ -101,7 +107,7 @@ def calculate_confidence_interval(accuracy, n, confidence=0.95):
 
 
 def load_results_from_folder(folder_path):
-    """Load all JSON results from folder and calculate accuracies."""
+    """Load all JSON results from folder and calculate accuracies keyed by LoRA name."""
     folder = Path(folder_path)
     results = {}
 
@@ -121,10 +127,11 @@ def load_results_from_folder(folder_path):
         with open(json_file, "r") as f:
             data = json.load(f)
 
-        # Use label from mapping, or filename if not mapped
-        label = JSON_TO_LABEL.get(json_file.name, json_file.name)
+        # Prefer the LoRA path's last segment as the key (consistent with other plots)
+        lora_path = data["meta"]["investigator_lora_path"]
+        lora_name = lora_path.split("/")[-1]
 
-        records = data.get("records", [])
+        records = data["records"]
 
         # Calculate accuracies and counts
         iid_acc, iid_count = calculate_accuracy(records, IID_DATASETS)
@@ -134,7 +141,7 @@ def load_results_from_folder(folder_path):
         iid_ci = calculate_confidence_interval(iid_acc, iid_count)
         ood_ci = calculate_confidence_interval(ood_acc, ood_count)
 
-        results[label] = {
+        results[lora_name] = {
             "iid_accuracy": iid_acc,
             "ood_accuracy": ood_acc,
             "iid_ci": iid_ci,
@@ -143,89 +150,90 @@ def load_results_from_folder(folder_path):
             "ood_count": ood_count,
         }
 
-        print(f"{label}:")
+        print(f"{lora_name}:")
         print(f"  IID Accuracy: {iid_acc:.2%} ± {iid_ci:.2%} (n={iid_count})")
         print(f"  OOD Accuracy: {ood_acc:.2%} ± {ood_ci:.2%} (n={ood_count})")
 
     return results
 
 
-def plot_accuracies(results, output_path=None):
-    """Create bar plots for IID and OOD accuracies."""
-    labels = list(results.keys())
-    iid_accs = [results[name]["iid_accuracy"] for name in labels]
-    ood_accs = [results[name]["ood_accuracy"] for name in labels]
-    iid_cis = [results[name]["iid_ci"] for name in labels]
-    ood_cis = [results[name]["ood_ci"] for name in labels]
+def _plot_split(results, split, highlight_keyword, title, output_path, highlight_color="#FDB813", highlight_hatch="////"):
+    """Plot a single split (IID or OOD) mirroring the style of gender plots."""
+    assert split in ("iid", "ood")
 
-    # Generate distinct colors for each bar
-    colors = plt.cm.tab10(np.linspace(0, 1, len(labels)))
+    names = list(results.keys())
+    values = [results[name][f"{split}_accuracy"] for name in names]
+    errors = [results[name][f"{split}_ci"] for name in names]
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+    # Find and require exactly one highlighted entry, move it to index 0
+    matches = [i for i, n in enumerate(names) if highlight_keyword in n]
+    assert len(matches) == 1, f"Keyword '{highlight_keyword}' matched {len(matches)}: {[names[i] for i in matches]}"
+    m = matches[0]
+    order = [m] + [i for i in range(len(names)) if i != m]
+    names = [names[i] for i in order]
+    values = [values[i] for i in order]
+    errors = [errors[i] for i in order]
 
-    # IID plot
-    x_pos = np.arange(len(labels))
-    bars1 = ax1.bar(x_pos, iid_accs, color=colors, alpha=0.8, yerr=iid_cis, capsize=5)
-    ax1.set_ylabel("Accuracy", fontsize=LABEL_FONT_SIZE, fontweight="bold")
-    ax1.set_title("IID Dataset Accuracy", fontsize=TITLE_FONT_SIZE, fontweight="bold")
-    ax1.set_xticks([])
-    # ax1.set_ylim([0, 1])
-    ax1.tick_params(axis="both", labelsize=TICK_FONT_SIZE)
-    ax1.grid(axis="y", alpha=0.3)
+    # Print dictionary template for labels (for LoRA entries)
+    print("\n" + "=" * 60)
+    print("Copy this dictionary and fill in your custom labels:")
+    print("=" * 60)
+    print("CUSTOM_LABELS = {")
+    for name in names:
+        print(f'    "{name}": "",')
+    print("}")
+    print("=" * 60 + "\n")
 
-    # Add value labels on bars
-    for bar in bars1:
-        height = bar.get_height()
-        ax1.text(
-            bar.get_x() + bar.get_width() / 2.0,
-            height,
-            f"{height:.1%}",
-            ha="center",
-            va="bottom",
-            fontsize=VALUE_LABEL_FONT_SIZE,
-        )
+    fig, ax = plt.subplots(figsize=(12, 6))
+    colors = list(plt.cm.tab10(np.linspace(0, 1, len(names))))
+    colors[0] = highlight_color
+    bars = ax.bar(range(len(names)), values, color=colors, yerr=errors, capsize=5, error_kw={"linewidth": 2})
 
-    # OOD plot
-    bars2 = ax2.bar(x_pos, ood_accs, color=colors, alpha=0.8, yerr=ood_cis, capsize=5)
-    ax2.set_ylabel("Accuracy", fontsize=LABEL_FONT_SIZE, fontweight="bold")
-    ax2.set_title("OOD Dataset Accuracy", fontsize=TITLE_FONT_SIZE, fontweight="bold")
-    ax2.set_xticks([])
-    # ax2.set_ylim([0, 1])
-    ax2.tick_params(axis="both", labelsize=TICK_FONT_SIZE)
-    ax2.grid(axis="y", alpha=0.3)
+    # Distinctive styling for the highlighted bar
+    bars[0].set_hatch(highlight_hatch)
+    bars[0].set_edgecolor("black")
+    bars[0].set_linewidth(2.0)
 
-    # Add value labels on bars
-    for bar in bars2:
-        height = bar.get_height()
-        ax2.text(
-            bar.get_x() + bar.get_width() / 2.0,
-            height,
-            f"{height:.1%}",
-            ha="center",
-            va="bottom",
-            fontsize=VALUE_LABEL_FONT_SIZE,
-        )
+    ax.set_xlabel("Investigator LoRA")
+    ax.set_ylabel("Average Accuracy")
+    ax.set_title(title)
+    ax.set_xticks(range(len(names)))
+    ax.set_xticklabels([])
+    ax.set_ylim(0, 1.1)
+    ax.grid(axis="y", alpha=0.3)
 
-    # Shared legend centered beneath both plots
-    legend_labels = [f"{label}" for label in labels]
-    legend_columns = min(len(legend_labels), 1) or 1
-    fig.legend(
-        bars1,
-        legend_labels,
-        loc="lower center",
-        bbox_to_anchor=(0.5, -0.02),
-        ncol=legend_columns,
-        frameon=True,
-        fontsize=LEGEND_FONT_SIZE,
-    )
+    # Numeric labels above bars
+    for bar, val, err in zip(bars, values, errors):
+        h = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2.0, h + err + 0.02, f"{val:.3f}", ha="center", va="bottom", fontsize=10)
 
-    plt.tight_layout(pad=2.0, rect=(0, 0.12, 1, 1))
+    # Legend uses CUSTOM_LABELS when available
+    legend_labels = []
+    for name in names:
+        if name in CUSTOM_LABELS and CUSTOM_LABELS[name]:
+            legend_labels.append(CUSTOM_LABELS[name])
+        else:
+            legend_labels.append(name)
 
-    if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
-        print(f"\nPlot saved to: {output_path}")
+    ax.legend(bars, legend_labels, loc="upper center", bbox_to_anchor=(0.5, -0.15), fontsize=10, ncol=2, frameon=False)
 
-    plt.show()
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.2)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    print(f"\nPlot saved as '{output_path}'")
+
+
+def plot_iid_and_ood(results, highlight_keyword, output_path_base):
+    """Create separate IID and OOD plots with highlighted LoRA."""
+    # Titles to mirror the other plotting style
+    title_iid = "Classification Results: IID Datasets"
+    title_ood = "Classification Results: OOD Datasets"
+
+    iid_path = f"{output_path_base}_iid.png"
+    ood_path = f"{output_path_base}_ood.png"
+
+    _plot_split(results, "iid", highlight_keyword, title_iid, iid_path)
+    _plot_split(results, "ood", highlight_keyword, title_ood, ood_path)
 
 
 def main():
@@ -236,8 +244,8 @@ def main():
         print("No JSON files found in the specified folder!")
         return
 
-    print(f"\nGenerating plots...")
-    plot_accuracies(results, OUTPUT_PATH)
+    print(f"\nGenerating IID and OOD plots with highlight '{HIGHLIGHT_KEYWORD}'...")
+    plot_iid_and_ood(results, HIGHLIGHT_KEYWORD, OUTPUT_PATH_BASE)
 
 
 if __name__ == "__main__":
