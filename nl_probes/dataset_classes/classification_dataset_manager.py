@@ -498,6 +498,225 @@ class SingularPluralDatasetLoader(DatasetLoader):
         return context_qa
 
 
+class EngelsDatasetLoader(DatasetLoader):
+    GROUP_NAME = "engels"
+    DATA_FILES_PATH = os.path.join(DEFAULT_DATA_DIR, "engels")
+
+    # Dataset name -> file mapping and label schema (positive, negative)
+    DATASET_CONFIGS = {
+        "news_class_politics": {
+            "file": "139_news_class_Politics.csv",
+            "labels": ("politics", "not_politics"),
+        },
+        "headline_istrump": {
+            "file": "21_headline_istrump.csv",
+            "labels": ("trump", "not_trump"),
+        },
+        "headline_isobama": {
+            "file": "22_headline_isobama.csv",
+            "labels": ("obama", "not_obama"),
+        },
+        "headline_ischina": {
+            "file": "23_headline_ischina.csv",
+            "labels": ("china", "not_china"),
+        },
+        "wikidata_isjournalist": {
+            "file": "59_wikidata_occupation_isjournalist.csv",
+            "labels": ("journalist", "not_journalist"),
+        },
+        "hist_fig_ismale": {
+            "file": "5_hist_fig_ismale.csv",
+            "labels": ("male", "female"),
+        },
+        "wikidata_isathlete": {
+            "file": "60_wikidata_occupation_isathlete.csv",
+            "labels": ("athlete", "not_athlete"),
+        },
+        "wikidata_ispolitician": {
+            "file": "62_wikidata_occupation_ispolitician.csv",
+            "labels": ("politician", "not_politician"),
+        },
+        "wikidata_issinger": {
+            "file": "63_wikidata_occupation_issinger.csv",
+            "labels": ("singer", "not_singer"),
+        },
+        "wikidata_isresearcher": {
+            "file": "64_wikidata_occupation_isresearcher.csv",
+            "labels": ("researcher", "not_researcher"),
+        },
+    }
+
+    def __init__(self, name: str):
+        super().__init__(self.__class__.GROUP_NAME, name)
+        # Narrow paraphrases to the specific dataset within the Engels group
+        with open(os.path.join(DEFAULT_DATA_DIR, "paraphrases/question.json")) as f:
+            self.question_paraphrases = json.load(f)[self.__class__.GROUP_NAME][name]
+
+    def load(self, num_qa_per_sample: int) -> list[ContextQASample]:
+        cfg = self.DATASET_CONFIGS[self.name]
+        df = pd.read_csv(os.path.join(self.DATA_FILES_PATH, cfg["file"]))
+        examples = df.to_dict(orient="records")
+
+        pos_label, neg_label = cfg["labels"]
+        class_labels = {pos_label, neg_label}
+
+        context_qa: list[ContextQASample] = []
+        for example in examples:
+            target = example["target"]
+            is_positive = target in (1, "1", True, "True", "true")
+            correct_label = pos_label if is_positive else neg_label
+
+            questions = []
+            answers = []
+            for _ in range(num_qa_per_sample):
+                ans = random.choice([YES_TOKEN, NO_TOKEN])
+                answers.append(ans)
+                if ans == YES_TOKEN:
+                    q_label = correct_label
+                else:
+                    q_label = random.choice(list(class_labels - {correct_label}))
+                questions.append(
+                    "# "
+                    + random.choice(self.question_paraphrases[q_label]).format(q_label)
+                )
+
+            context_qa.append(
+                ContextQASample(
+                    context=str(example["prompt"]).strip(),
+                    questions=questions,
+                    answers=answers,
+                    ds_label=correct_label,
+                )
+            )
+
+        return context_qa
+
+    @staticmethod
+    def get_all_loaders():
+        return [EngelsDatasetLoader(name) for name in EngelsDatasetLoader.DATASET_CONFIGS]
+
+
+class BaseEngelsCsvBinaryLoader(DatasetLoader):
+    DATA_FILES_PATH = os.path.join(DEFAULT_DATA_DIR, "engels")
+    GROUP_NAME: str
+    DATASET_NAME: str
+    FILE_NAME: str
+    LABELS: tuple[str, str]
+
+    def __init__(self):
+        # Do not call super(); we want to load paraphrases from the shared 'engels' block
+        self.group = self.__class__.GROUP_NAME
+        self.name = self.__class__.DATASET_NAME
+        with open(os.path.join(DEFAULT_DATA_DIR, "paraphrases/question.json")) as f:
+            self.question_paraphrases = json.load(f)["engels"][self.__class__.DATASET_NAME]
+
+    def load(self, num_qa_per_sample: int) -> list[ContextQASample]:
+        df = pd.read_csv(os.path.join(self.DATA_FILES_PATH, self.__class__.FILE_NAME))
+        examples = df.to_dict(orient="records")
+
+        pos_label, neg_label = self.__class__.LABELS
+        class_labels = {pos_label, neg_label}
+
+        context_qa: list[ContextQASample] = []
+        for example in examples:
+            target = example["target"]
+            is_positive = target in (1, "1", True, "True", "true")
+            correct_label = pos_label if is_positive else neg_label
+
+            questions = []
+            answers = []
+            for _ in range(num_qa_per_sample):
+                ans = random.choice([YES_TOKEN, NO_TOKEN])
+                answers.append(ans)
+                if ans == YES_TOKEN:
+                    q_label = correct_label
+                else:
+                    q_label = random.choice(list(class_labels - {correct_label}))
+                questions.append(
+                    "# " + random.choice(self.question_paraphrases[q_label]).format(q_label)
+                )
+
+            context_qa.append(
+                ContextQASample(
+                    context=str(example["prompt"]).strip(),
+                    questions=questions,
+                    answers=answers,
+                    ds_label=correct_label,
+                )
+            )
+
+        return context_qa
+
+
+class EngelsNewsClassPoliticsLoader(BaseEngelsCsvBinaryLoader):
+    GROUP_NAME = "engels_news_class_politics"
+    DATASET_NAME = "news_class_politics"
+    FILE_NAME = "139_news_class_Politics.csv"
+    LABELS = ("politics", "not_politics")
+
+
+class EngelsHeadlineIsTrumpLoader(BaseEngelsCsvBinaryLoader):
+    GROUP_NAME = "engels_headline_istrump"
+    DATASET_NAME = "headline_istrump"
+    FILE_NAME = "21_headline_istrump.csv"
+    LABELS = ("trump", "not_trump")
+
+
+class EngelsHeadlineIsObamaLoader(BaseEngelsCsvBinaryLoader):
+    GROUP_NAME = "engels_headline_isobama"
+    DATASET_NAME = "headline_isobama"
+    FILE_NAME = "22_headline_isobama.csv"
+    LABELS = ("obama", "not_obama")
+
+
+class EngelsHeadlineIsChinaLoader(BaseEngelsCsvBinaryLoader):
+    GROUP_NAME = "engels_headline_ischina"
+    DATASET_NAME = "headline_ischina"
+    FILE_NAME = "23_headline_ischina.csv"
+    LABELS = ("china", "not_china")
+
+
+class EngelsHistFigIsMaleLoader(BaseEngelsCsvBinaryLoader):
+    GROUP_NAME = "engels_hist_fig_ismale"
+    DATASET_NAME = "hist_fig_ismale"
+    FILE_NAME = "5_hist_fig_ismale.csv"
+    LABELS = ("male", "female")
+
+
+class EngelsWikidataIsJournalistLoader(BaseEngelsCsvBinaryLoader):
+    GROUP_NAME = "engels_wikidata_isjournalist"
+    DATASET_NAME = "wikidata_isjournalist"
+    FILE_NAME = "59_wikidata_occupation_isjournalist.csv"
+    LABELS = ("journalist", "not_journalist")
+
+
+class EngelsWikidataIsAthleteLoader(BaseEngelsCsvBinaryLoader):
+    GROUP_NAME = "engels_wikidata_isathlete"
+    DATASET_NAME = "wikidata_isathlete"
+    FILE_NAME = "60_wikidata_occupation_isathlete.csv"
+    LABELS = ("athlete", "not_athlete")
+
+
+class EngelsWikidataIsPoliticianLoader(BaseEngelsCsvBinaryLoader):
+    GROUP_NAME = "engels_wikidata_ispolitician"
+    DATASET_NAME = "wikidata_ispolitician"
+    FILE_NAME = "62_wikidata_occupation_ispolitician.csv"
+    LABELS = ("politician", "not_politician")
+
+
+class EngelsWikidataIsSingerLoader(BaseEngelsCsvBinaryLoader):
+    GROUP_NAME = "engels_wikidata_issinger"
+    DATASET_NAME = "wikidata_issinger"
+    FILE_NAME = "63_wikidata_occupation_issinger.csv"
+    LABELS = ("singer", "not_singer")
+
+
+class EngelsWikidataIsResearcherLoader(BaseEngelsCsvBinaryLoader):
+    GROUP_NAME = "engels_wikidata_isresearcher"
+    DATASET_NAME = "wikidata_isresearcher"
+    FILE_NAME = "64_wikidata_occupation_isresearcher.csv"
+    LABELS = ("researcher", "not_researcher")
+
 class LanguageIDDatasetLoader(DatasetLoader):
     GROUP_NAME = "language_identification"
     DATASET_NAME = "language_identification"
@@ -542,6 +761,19 @@ class DatasetManager:
         for dataset in (
             GeometryOfTruthDatasetLoader.get_all_loaders()
             + RelationDatasetLoader.get_all_loaders()
+            + EngelsDatasetLoader.get_all_loaders()
+            + [
+                EngelsNewsClassPoliticsLoader(),
+                EngelsHeadlineIsTrumpLoader(),
+                EngelsHeadlineIsObamaLoader(),
+                EngelsHeadlineIsChinaLoader(),
+                EngelsHistFigIsMaleLoader(),
+                EngelsWikidataIsJournalistLoader(),
+                EngelsWikidataIsAthleteLoader(),
+                EngelsWikidataIsPoliticianLoader(),
+                EngelsWikidataIsSingerLoader(),
+                EngelsWikidataIsResearcherLoader(),
+            ]
             + [
                 SstDatasetLoader(),
                 MdGenderDatasetLoader(),

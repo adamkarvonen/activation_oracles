@@ -222,6 +222,168 @@
         "Is the text presented in {}?",
         "Is this passage composed in {}?"
     ],
+    "engels": {
+        "news_class_politics": {
+            "politics": [
+                "Is this article about politics?",
+                "Does this text concern politics?",
+                "Would you classify this as political news?",
+                "Is the topic here politics?",
+                "Can this be categorized as politics?"
+            ],
+            "not_politics": [
+                "Is this article not about politics?",
+                "Is the topic something other than politics?",
+                "Would you say this isn’t political news?",
+                "Does this text avoid political topics?",
+                "Is this piece unrelated to politics?"
+            ]
+        },
+        "headline_istrump": {
+            "trump": [
+                "Is this headline about Donald Trump?",
+                "Does this mention Donald Trump?",
+                "Is Trump the subject of this headline?",
+                "Is Donald Trump referenced here?",
+                "Is this about Trump?"
+            ],
+            "not_trump": [
+                "Is this headline not about Donald Trump?",
+                "Is someone other than Donald Trump the subject?",
+                "Does this avoid mentioning Donald Trump?",
+                "Is this unrelated to Donald Trump?",
+                "Is Trump not the topic here?"
+            ]
+        },
+        "headline_isobama": {
+            "obama": [
+                "Is this headline about Barack Obama?",
+                "Does this mention Barack Obama?",
+                "Is Obama the subject of this headline?",
+                "Is Barack Obama referenced here?",
+                "Is this about Obama?"
+            ],
+            "not_obama": [
+                "Is this headline not about Barack Obama?",
+                "Is someone other than Barack Obama the subject?",
+                "Does this avoid mentioning Barack Obama?",
+                "Is this unrelated to Barack Obama?",
+                "Is Obama not the topic here?"
+            ]
+        },
+        "headline_ischina": {
+            "china": [
+                "Is this headline about China?",
+                "Does this mention China?",
+                "Is China the subject of this headline?",
+                "Is China referenced here?",
+                "Is this about China?"
+            ],
+            "not_china": [
+                "Is this headline not about China?",
+                "Is the topic something other than China?",
+                "Does this avoid mentioning China?",
+                "Is this unrelated to China?",
+                "Is China not the topic here?"
+            ]
+        },
+        "hist_fig_ismale": {
+            "male": [
+                "Is this person male?",
+                "Is the subject a man?",
+                "Would you say this is a male?",
+                "Is this an example of a male figure?",
+                "Is this individual a man?"
+            ],
+            "female": [
+                "Is this person female?",
+                "Is the subject a woman?",
+                "Would you say this is a female?",
+                "Is this an example of a female figure?",
+                "Is this individual a woman?"
+            ]
+        },
+        "wikidata_isjournalist": {
+            "journalist": [
+                "Is this person a journalist?",
+                "Does this person work in journalism?",
+                "Would you say their occupation is journalism?",
+                "Is journalism their profession?",
+                "Is this an example of a journalist?"
+            ],
+            "not_journalist": [
+                "Is this person not a journalist?",
+                "Is their occupation something other than journalism?",
+                "Would you say they do not work in journalism?",
+                "Is journalism not their profession?",
+                "Is this not an example of a journalist?"
+            ]
+        },
+        "wikidata_isathlete": {
+            "athlete": [
+                "Is this person an athlete?",
+                "Does this person compete in sports?",
+                "Would you say their profession is athletics?",
+                "Is athletics their field?",
+                "Is this an example of an athlete?"
+            ],
+            "not_athlete": [
+                "Is this person not an athlete?",
+                "Is their vocation something other than sports?",
+                "Would you say they do not compete in sports?",
+                "Is athletics not their field?",
+                "Is this not an example of an athlete?"
+            ]
+        },
+        "wikidata_ispolitician": {
+            "politician": [
+                "Is this person a politician?",
+                "Does this person serve in politics?",
+                "Would you say their occupation is politics?",
+                "Is politics their profession?",
+                "Is this an example of a politician?"
+            ],
+            "not_politician": [
+                "Is this person not a politician?",
+                "Is their occupation something other than politics?",
+                "Would you say they do not work in politics?",
+                "Is politics not their profession?",
+                "Is this not an example of a politician?"
+            ]
+        },
+        "wikidata_issinger": {
+            "singer": [
+                "Is this person a singer?",
+                "Does this person perform as a vocalist?",
+                "Would you say their occupation is singing?",
+                "Is singing their profession?",
+                "Is this an example of a singer?"
+            ],
+            "not_singer": [
+                "Is this person not a singer?",
+                "Is their occupation something other than singing?",
+                "Would you say they do not perform as a vocalist?",
+                "Is singing not their profession?",
+                "Is this not an example of a singer?"
+            ]
+        },
+        "wikidata_isresearcher": {
+            "researcher": [
+                "Is this person a researcher?",
+                "Does this person conduct research?",
+                "Would you say their occupation is research?",
+                "Is research their profession?",
+                "Is this an example of a researcher?"
+            ],
+            "not_researcher": [
+                "Is this person not a researcher?",
+                "Is their occupation something other than research?",
+                "Would you say they do not conduct research?",
+                "Is research not their profession?",
+                "Is this not an example of a researcher?"
+            ]
+        }
+    },
     "singular_plural": {
         "single": [
             "Would you say this sentence mentions a single person?",
