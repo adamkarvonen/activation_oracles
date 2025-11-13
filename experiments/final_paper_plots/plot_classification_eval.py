@@ -50,10 +50,16 @@ CUSTOM_LABELS = {
     "checkpoints_classification_single_token_Qwen3-8B": "Classification Single Token Training",
     # zero-shot baseline
     "Qwen3-8B": "Zero-Shot Baseline",
+    "checkpoints_act_cls_latentqa_pretrain_mix_adding_Llama-3_3-70B-Instruct": "Past Lens + LatentQA + Classification",
+    "checkpoints_cls_only_adding_Llama-3_3-70B-Instruct": "Classification",
+    "checkpoints_latentqa_only_adding_Llama-3_3-70B-Instruct": "LatentQA",
 }
 
-# Which LoRA to highlight (substring match, must match exactly one entry)
-HIGHLIGHT_KEYWORD = "latentqa_cls_past_lens"
+if "llama" in RUN_DIR.lower():
+    HIGHLIGHT_KEYWORD = "act_cls_latentqa_pretrain_mix"
+else:
+    # Which LoRA to highlight (substring match, must match exactly one entry)
+    HIGHLIGHT_KEYWORD = "latentqa_cls_past_lens"
 
 # Dataset groupings
 IID_DATASETS = [
