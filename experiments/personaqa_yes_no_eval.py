@@ -81,6 +81,7 @@ if __name__ == "__main__":
                 "adamkarvonen/checkpoints_act_cls_latentqa_pretrain_mix_adding_Llama-3_3-70B-Instruct",
                 "adamkarvonen/checkpoints_latentqa_only_adding_Llama-3_3-70B-Instruct",
                 "adamkarvonen/checkpoints_cls_only_adding_Llama-3_3-70B-Instruct",
+                None,
             ]
             target_lora_path_template = "{lora_path}"
             segment_start = -20
