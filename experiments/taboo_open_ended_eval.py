@@ -18,8 +18,8 @@ from nl_probes.utils.common import load_model, load_tokenizer
 
 if __name__ == "__main__":
     # Model and dtype
-    model_name = "Qwen/Qwen3-8B"
-    # model_name = "google/gemma-2-9b-it"
+    # model_name = "Qwen/Qwen3-8B"
+    model_name = "google/gemma-2-9b-it"
     model_name_str = model_name.split("/")[-1].replace(".", "_")
 
     random.seed(42)
@@ -72,6 +72,14 @@ if __name__ == "__main__":
             "adamkarvonen/checkpoints_cls_latentqa_only_addition_gemma-2-9b-it",
             "adamkarvonen/checkpoints_latentqa_only_addition_gemma-2-9b-it",
             "adamkarvonen/checkpoints_cls_only_addition_gemma-2-9b-it",
+            None,
+            # "checkpoints_latentqa_cls_past_lens_gemma-2-9b-it_1e-6/final",
+            # "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_1e-6",
+            # "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_3e-6",
+            # "adamkarvonen/checkpoints_latentqa_only_addition_gemma-2-9b-it",
+            # "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_3e-5",
+            # "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_1e-4",
+            # "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_3e-4",
         ]
         target_lora_path_template: Optional[str] = "bcywinski/gemma-2-9b-it-taboo-{lora_path}"
         segment_start = -10

@@ -41,7 +41,7 @@ class ClassificationDatasetConfig(BaseDatasetConfig):
 
 
 class ClassificationDatasetLoader(ActDatasetLoader):
-    def __init__(self, dataset_config: DatasetLoaderConfig, model_kwargs: dict[str, Any] | None = None):
+    def __init__(self, dataset_config: DatasetLoaderConfig, model_kwargs: dict[str, Any] | None = None, model=None):
         super().__init__(dataset_config)
 
         self.dataset_params: ClassificationDatasetConfig = dataset_config.custom_dataset_params
@@ -50,6 +50,7 @@ class ClassificationDatasetLoader(ActDatasetLoader):
 
         self.dataset_config.dataset_name = f"classification_{self.dataset_params.classification_dataset_name}"
         self.model_kwargs = model_kwargs
+        self.model = model
 
         self.act_layers = [
             layer_percent_to_layer(self.dataset_config.model_name, layer_percent)
@@ -96,6 +97,7 @@ class ClassificationDatasetLoader(ActDatasetLoader):
                 datapoint_type=self.dataset_config.dataset_name,
                 debug_print=False,
                 model_kwargs=self.model_kwargs,
+                model=self.model,
             )
 
             self.save_dataset(data, split)
@@ -177,6 +179,7 @@ def create_vector_dataset(
     lora_path: str | None = None,
     debug_print: bool = False,
     model_kwargs: dict[str, Any] | None = None,
+    model=None,
 ) -> list[TrainingDataPoint]:
     assert min_end_offset < 0, "Min end offset must be negative"
     assert max_end_offset < 0, "Max end offset must be negative"
@@ -187,9 +190,10 @@ def create_vector_dataset(
     device = torch.device("cpu")
 
     if save_acts:
-        if model_kwargs is None:
-            model_kwargs = {}
-        model = load_model(model_name, torch.bfloat16, **model_kwargs)
+        if model is None:
+            if model_kwargs is None:
+                model_kwargs = {}
+            model = load_model(model_name, torch.bfloat16, **model_kwargs)
         submodules = {layer: get_hf_submodule(model, layer) for layer in act_layers}
         device = model.device
 

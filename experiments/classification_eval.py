@@ -7,7 +7,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import json
 from dataclasses import dataclass
 from typing import Any
-
+import gc
 import torch
 from peft import LoraConfig
 from transformers import BitsAndBytesConfig
@@ -29,13 +29,41 @@ from nl_probes.base_experiment import sanitize_lora_name
 
 
 # Model and eval config
-MODEL_NAME = "Qwen/Qwen3-8B"
-# MODEL_NAME = "Qwen/Qwen3-32B"
-MODEL_NAME = "google/gemma-2-9b-it"
-# MODEL_NAME = "meta-llama/Llama-3.3-70B-Instruct"
+MODEL_CONFIGS = {
+    "Qwen/Qwen3-8B": [
+        "adamkarvonen/checkpoints_cls_latentqa_only_addition_Qwen3-8B",
+        "adamkarvonen/checkpoints_latentqa_only_addition_Qwen3-8B",
+        "adamkarvonen/checkpoints_cls_only_addition_Qwen3-8B",
+        "adamkarvonen/checkpoints_latentqa_cls_past_lens_addition_Qwen3-8B",
+        "adamkarvonen/checkpoints_cls_latentqa_sae_addition_Qwen3-8B",
+        "adamkarvonen/checkpoints_classification_single_token_Qwen3-8B",
+        None,
+    ],
+    "google/gemma-2-9b-it": [
+        "adamkarvonen/checkpoints_cls_latentqa_only_addition_gemma-2-9b-it",
+        "adamkarvonen/checkpoints_latentqa_only_addition_gemma-2-9b-it",
+        "adamkarvonen/checkpoints_cls_only_addition_gemma-2-9b-it",
+        "adamkarvonen/checkpoints_latentqa_cls_past_lens_addition_gemma-2-9b-it",
+        "adamkarvonen/checkpoints_classification_single_token_gemma-2-9b-it",
+        None,
+        #     "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_1e-6",
+        #     "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_3e-6",
+        #     "adamkarvonen/checkpoints_latentqa_only_addition_gemma-2-9b-it",
+        #     "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_3e-5",
+        #     "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_1e-4",
+        #     "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_3e-4",
+    ],
+    "meta-llama/Llama-3.3-70B-Instruct": [
+        "adamkarvonen/checkpoints_act_cls_latentqa_pretrain_mix_adding_Llama-3_3-70B-Instruct",
+        "adamkarvonen/checkpoints_latentqa_only_adding_Llama-3_3-70B-Instruct",
+        "adamkarvonen/checkpoints_cls_only_adding_Llama-3_3-70B-Instruct",
+        None,
+    ],
+}
+
 INJECTION_LAYER = 1
 DTYPE = torch.bfloat16
-BATCH_SIZE = 256
+BASE_BATCH_SIZE = 256
 STEERING_COEFFICIENT = 1.0
 GENERATION_KWARGS = {
     "do_sample": False,
@@ -46,68 +74,20 @@ GENERATION_KWARGS = {
 
 PREFIX = "Answer with 'Yes' or 'No' only. "
 
-if MODEL_NAME == "Qwen/Qwen3-8B":
-    INVESTIGATOR_LORA_PATHS = [
-        "adamkarvonen/checkpoints_cls_latentqa_only_addition_Qwen3-8B",
-        "adamkarvonen/checkpoints_latentqa_only_addition_Qwen3-8B",
-        "adamkarvonen/checkpoints_cls_only_addition_Qwen3-8B",
-        "adamkarvonen/checkpoints_latentqa_cls_past_lens_addition_Qwen3-8B",
-        "adamkarvonen/checkpoints_cls_latentqa_sae_addition_Qwen3-8B",
-        "adamkarvonen/checkpoints_classification_single_token_Qwen3-8B",
-    ]
-elif MODEL_NAME == "google/gemma-2-9b-it":
-    INVESTIGATOR_LORA_PATHS = [
-        None,
-        "adamkarvonen/checkpoints_cls_latentqa_only_addition_gemma-2-9b-it",
-        "adamkarvonen/checkpoints_latentqa_only_addition_gemma-2-9b-it",
-        "adamkarvonen/checkpoints_cls_only_addition_gemma-2-9b-it",
-        "adamkarvonen/checkpoints_latentqa_cls_past_lens_addition_gemma-2-9b-it",
-        "adamkarvonen/checkpoints_classification_single_token_gemma-2-9b-it",
-    ]
-elif MODEL_NAME == "meta-llama/Llama-3.3-70B-Instruct":
-    INVESTIGATOR_LORA_PATHS = [
-        "adamkarvonen/checkpoints_act_cls_latentqa_pretrain_mix_adding_Llama-3_3-70B-Instruct",
-        "adamkarvonen/checkpoints_latentqa_only_adding_Llama-3_3-70B-Instruct",
-        "adamkarvonen/checkpoints_cls_only_adding_Llama-3_3-70B-Instruct",
-    ]
-else:
-    raise ValueError(f"Unsupported MODEL_NAME: {MODEL_NAME}")
-
 
 SINGLE_TOKEN_MODE = True
 
 mode_str = "single_token" if SINGLE_TOKEN_MODE else "multi_token"
 
-model_name_str = MODEL_NAME.split("/")[-1].replace(".", "_").replace(" ", "_")
 EXPERIMENTS_DIR = "experiments"
 DATA_DIR = "classification"
 
-RUN_DIR = f"{EXPERIMENTS_DIR}/{DATA_DIR}/classification_{model_name_str}_{mode_str}/"
-OUTPUT_JSON_TEMPLATE = f"{RUN_DIR}" + "classification_results_lora_{lora}.json"
-
-
 os.makedirs(EXPERIMENTS_DIR, exist_ok=True)
 os.makedirs(f"{EXPERIMENTS_DIR}/{DATA_DIR}", exist_ok=True)
-os.makedirs(RUN_DIR, exist_ok=True)
-
 
 device = torch.device("cuda")
 dtype = torch.bfloat16
 print(f"Using device={device}, dtype={dtype}")
-
-model_kwargs = {}
-
-
-if MODEL_NAME == "meta-llama/Llama-3.3-70B-Instruct":
-    bnb_config = BitsAndBytesConfig(
-        load_in_8bit=True,
-        bnb_8bit_compute_dtype=torch.bfloat16,
-    )
-    model_kwargs = {"quantization_config": bnb_config}
-
-
-if MODEL_NAME == "Qwen/Qwen3-32B":
-    BATCH_SIZE //= 4
 
 # Dataset selection
 MAIN_TEST_SIZE = 250
@@ -134,8 +114,9 @@ CLASSIFICATION_DATASETS: dict[str, dict[str, Any]] = {
     "engels_wikidata_isresearcher": {"num_train": 0, "num_test": 250, "splits": ["test"]},
 }
 
-# Layer percent settings used by loaders
-LAYER_PERCENTS = [25, 50, 75]
+# Layer percent settings - will iterate over these individually
+LAYER_PERCENTS = [25, 33, 50, 66, 75]
+LAYER_PERCENTS = [0, 10]
 
 KEY_FOR_NONE = "original"
 
@@ -156,71 +137,91 @@ def canonical_dataset_id(name: str) -> str:
     return name
 
 
-# %%
-# Tokenizer and dataset loading
-
-tokenizer = load_tokenizer(MODEL_NAME)
-
-classification_dataset_loaders: list[ClassificationDatasetLoader] = []
-for dataset_name, dcfg in CLASSIFICATION_DATASETS.items():
-    if "language_identification" in dataset_name:
-        batch_size = BATCH_SIZE // 8
-    else:
-        batch_size = BATCH_SIZE
-
-    if SINGLE_TOKEN_MODE:
-        classification_config = ClassificationDatasetConfig(
-            classification_dataset_name=dataset_name,
-            max_end_offset=-3,
-            min_end_offset=-3,
-            max_window_size=1,
-            min_window_size=1,
+def get_model_kwargs(model_name: str) -> dict:
+    """Return model kwargs based on model name."""
+    if model_name == "meta-llama/Llama-3.3-70B-Instruct":
+        bnb_config = BitsAndBytesConfig(
+            load_in_8bit=True,
+            bnb_8bit_compute_dtype=torch.bfloat16,
         )
-    else:
-        classification_config = ClassificationDatasetConfig(
-            classification_dataset_name=dataset_name,
-            max_end_offset=-1,
-            min_end_offset=-1,
-            max_window_size=50,
-            min_window_size=50,
+        return {"quantization_config": bnb_config}
+    return {}
+
+
+def get_batch_size(model_name: str) -> int:
+    """Return batch size based on model name."""
+    if model_name == "Qwen/Qwen3-32B":
+        return BASE_BATCH_SIZE // 4
+    return BASE_BATCH_SIZE
+
+
+def load_datasets_for_layer_percent(
+    model_name: str, layer_percent: int, model_kwargs: dict, model=None
+) -> dict[str, list[Any]]:
+    """Load all classification datasets for a specific model and layer percent."""
+    batch_size = get_batch_size(model_name)
+
+    classification_dataset_loaders: list[ClassificationDatasetLoader] = []
+    for dataset_name, dcfg in CLASSIFICATION_DATASETS.items():
+        if "language_identification" in dataset_name:
+            ds_batch_size = batch_size // 8
+        else:
+            ds_batch_size = batch_size
+
+        if SINGLE_TOKEN_MODE:
+            classification_config = ClassificationDatasetConfig(
+                classification_dataset_name=dataset_name,
+                max_end_offset=-3,
+                min_end_offset=-3,
+                max_window_size=1,
+                min_window_size=1,
+            )
+        else:
+            classification_config = ClassificationDatasetConfig(
+                classification_dataset_name=dataset_name,
+                max_end_offset=-1,
+                min_end_offset=-1,
+                max_window_size=50,
+                min_window_size=50,
+            )
+        dataset_config = DatasetLoaderConfig(
+            custom_dataset_params=classification_config,
+            num_train=dcfg["num_train"],
+            num_test=dcfg["num_test"],
+            splits=dcfg["splits"],
+            model_name=model_name,
+            layer_percents=[layer_percent],
+            save_acts=True,
+            batch_size=ds_batch_size,
         )
-    dataset_config = DatasetLoaderConfig(
-        custom_dataset_params=classification_config,
-        num_train=dcfg["num_train"],
-        num_test=dcfg["num_test"],
-        splits=dcfg["splits"],
-        model_name=MODEL_NAME,
-        layer_percents=LAYER_PERCENTS,
-        save_acts=False,
-        batch_size=batch_size,
-    )
-    classification_dataset_loaders.append(
-        ClassificationDatasetLoader(dataset_config=dataset_config, model_kwargs=model_kwargs)
-    )
+        classification_dataset_loaders.append(
+            ClassificationDatasetLoader(dataset_config=dataset_config, model_kwargs=model_kwargs, model=model)
+        )
 
-# Pull test sets for evaluation
-all_eval_data: dict[str, list[Any]] = {}
-for loader in classification_dataset_loaders:
-    if "test" in loader.dataset_config.splits:
-        ds_id = canonical_dataset_id(loader.dataset_config.dataset_name)
-        all_eval_data[ds_id] = loader.load_dataset("test")
+    # Pull test sets for evaluation
+    all_eval_data: dict[str, list[Any]] = {}
+    for loader in classification_dataset_loaders:
+        if "test" in loader.dataset_config.splits:
+            ds_id = canonical_dataset_id(loader.dataset_config.dataset_name)
+            all_eval_data[ds_id] = loader.load_dataset("test")
 
-print(f"Loaded datasets: {list(all_eval_data.keys())}")
+    return all_eval_data
 
-# %%
-# Model and submodule
-
-model = load_model(MODEL_NAME, dtype, **model_kwargs)
-submodule = get_hf_submodule(model, INJECTION_LAYER)
-
-dummy_config = LoraConfig()
-model.add_adapter(dummy_config, adapter_name="default")
 
 # %%
 # Evaluation (fast path: load JSON if available, heavy path: run fresh)
 
 
-def run_eval_for_datasets(lora_path: str | None, eval_data_by_ds: dict[str, list[Any]]) -> dict[str, dict[str, Any]]:
+def run_eval_for_datasets(
+    model,
+    tokenizer,
+    submodule,
+    model_name: str,
+    layer_percent: int,
+    lora_path: str | None,
+    eval_data_by_ds: dict[str, list[Any]],
+    batch_size: int,
+) -> dict[str, dict[str, Any]]:
     """
     Returns:
         results[dataset_id][method_key] -> metrics dict
@@ -241,13 +242,13 @@ def run_eval_for_datasets(lora_path: str | None, eval_data_by_ds: dict[str, list
 
     results: dict = {
         "meta": {
-            "model_name": MODEL_NAME,
+            "model_name": model_name,
             "dtype": str(DTYPE),
-            "layer_percents": LAYER_PERCENTS,
+            "layer_percent": layer_percent,
             "injection_layer": INJECTION_LAYER,
             "investigator_lora_path": lora_path,
             "steering_coefficient": STEERING_COEFFICIENT,
-            "eval_batch_size": BATCH_SIZE,
+            "eval_batch_size": batch_size,
             "generation_kwargs": GENERATION_KWARGS,
             "single_token_mode": SINGLE_TOKEN_MODE,
         },
@@ -265,7 +266,7 @@ def run_eval_for_datasets(lora_path: str | None, eval_data_by_ds: dict[str, list
             dtype=dtype,
             global_step=-1,
             lora_path=lora_path,
-            eval_batch_size=BATCH_SIZE,
+            eval_batch_size=batch_size,
             steering_coefficient=STEERING_COEFFICIENT,
             generation_kwargs=GENERATION_KWARGS,
         )
@@ -285,20 +286,68 @@ def run_eval_for_datasets(lora_path: str | None, eval_data_by_ds: dict[str, list
     return results
 
 
-for lora in INVESTIGATOR_LORA_PATHS:
-    print(f"Evaluating LORA: {lora}")
-    if lora is None:
-        active_lora_path = None
-        lora_name = "base_model"
-    else:
-        active_lora_path = f"{LORA_DIR}{lora}"
-        lora_name = lora.split("/")[-1].replace("/", "_").replace(".", "_")
+# %%
+# Main loop over models and layer percents
 
-    results = run_eval_for_datasets(active_lora_path, all_eval_data)
+for model_name in MODEL_CONFIGS:
+    print(f"\n{'=' * 60}")
+    print(f"Processing model: {model_name}")
+    print(f"{'=' * 60}")
 
-    # Optionally save to JSON
-    if OUTPUT_JSON_TEMPLATE is not None:
-        OUTPUT_JSON = OUTPUT_JSON_TEMPLATE.format(lora=lora_name)
-        with open(OUTPUT_JSON, "w") as f:
-            json.dump(results, f, indent=2)
-        print(f"Saved results to {OUTPUT_JSON}")
+    investigator_lora_paths = MODEL_CONFIGS[model_name]
+    model_kwargs = get_model_kwargs(model_name)
+    batch_size = get_batch_size(model_name)
+
+    model_name_str = model_name.split("/")[-1].replace(".", "_").replace(" ", "_")
+
+    # Load model and tokenizer
+    tokenizer = load_tokenizer(model_name)
+    model = load_model(model_name, dtype, **model_kwargs)
+    submodule = get_hf_submodule(model, INJECTION_LAYER)
+
+    dummy_config = LoraConfig()
+    model.add_adapter(dummy_config, adapter_name="default")
+
+    for layer_percent in LAYER_PERCENTS:
+        print(f"\n--- Layer percent: {layer_percent} ---")
+
+        # Create run_dir with layer_percent in folder name
+        run_dir = f"{EXPERIMENTS_DIR}/{DATA_DIR}/classification_{model_name_str}_{mode_str}_{layer_percent}/"
+        os.makedirs(run_dir, exist_ok=True)
+
+        # Load datasets for this layer percent (reuses the loaded model)
+        all_eval_data = load_datasets_for_layer_percent(model_name, layer_percent, model_kwargs, model=model)
+        print(f"Loaded datasets: {list(all_eval_data.keys())}")
+
+        output_json_template = f"{run_dir}" + "classification_results_lora_{lora}.json"
+
+        for lora in investigator_lora_paths:
+            print(f"Evaluating LORA: {lora}")
+            if lora is None:
+                active_lora_path = None
+                lora_name = "base_model"
+            else:
+                active_lora_path = f"{LORA_DIR}{lora}"
+                lora_name = lora.split("/")[-1].replace("/", "_").replace(".", "_")
+
+            results = run_eval_for_datasets(
+                model=model,
+                tokenizer=tokenizer,
+                submodule=submodule,
+                model_name=model_name,
+                layer_percent=layer_percent,
+                lora_path=active_lora_path,
+                eval_data_by_ds=all_eval_data,
+                batch_size=batch_size,
+            )
+
+            output_json = output_json_template.format(lora=lora_name)
+            with open(output_json, "w") as f:
+                json.dump(results, f, indent=2)
+            print(f"Saved results to {output_json}")
+
+    # Clean up model before loading next one
+    del model
+    del tokenizer
+    torch.cuda.empty_cache()
+    gc.collect()

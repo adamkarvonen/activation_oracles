@@ -14,14 +14,14 @@ FONT_SIZE_LEGEND = 14  # Legend text size
 
 # Configuration - models and task types to iterate over
 MODELS = [
-    "Qwen3-8B",
+    # "Qwen3-8B",
     "gemma-2-9b-it",
-    "Llama-3_3-70B-Instruct",
+    # "Llama-3_3-70B-Instruct",
 ]
 
 TASK_TYPES = [
     "open_ended",
-    "yes_no",
+    # "yes_no",
 ]
 
 IMAGE_FOLDER = "images"

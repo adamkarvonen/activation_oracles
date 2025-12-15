@@ -28,7 +28,7 @@ os.makedirs(CLS_IMAGE_FOLDER, exist_ok=True)
 
 
 SEQUENCE = False
-SEQUENCE = True
+# SEQUENCE = True
 
 sequence_str = "sequence" if SEQUENCE else "token"
 

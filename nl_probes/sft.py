@@ -859,8 +859,9 @@ if __name__ == "__main__":
     hook_layer = 1
     model_name = "Qwen/Qwen3-32B"
     model_name = "meta-llama/Llama-3.3-70B-Instruct"
-    model_name = "Qwen/Qwen3-8B"
+    # model_name = "Qwen/Qwen3-8B"
     # model_name = "Qwen/Qwen3-1.7B"
+    model_name = "google/gemma-2-9b-it"
     hf_repo_name = f"qwen3-8b-hook-layer-{hook_layer}"
 
     model_name_str = model_name.split("/")[-1].replace(".", "_").replace(" ", "_")
@@ -876,10 +877,9 @@ if __name__ == "__main__":
         )
         model_kwargs = {"quantization_config": bnb_config}
 
-    
-    if model_name == "meta-llama/Llama-3.3-70B-Instruct":
-        train_batch_size = train_batch_size * 4 # increase gpu utilization on multiple GPUs
-        # cuts training time by ~50%
+    # if model_name == "meta-llama/Llama-3.3-70B-Instruct":
+    # train_batch_size = train_batch_size * 4  # increase gpu utilization on 4x GPUs
+    # cuts training time by ~50%
 
     print("Global train batch size:", train_batch_size)
     assert train_batch_size % world_size == 0, (
@@ -921,16 +921,16 @@ if __name__ == "__main__":
     latentqa_loaders = loader_groups["latentqa_loaders"]
 
     iterations = [
-        {
-            "load_lora_path": f"checkpoints_act_single_and_multi_pretrain_only_{model_name_str}/final",
-            "dataset_loaders": (
-                classification_dataset_loaders
-                + sae_explanation_dataset_loaders
-                + sae_dataset_loaders
-                + latentqa_loaders
-            ),
-            "wandb_suffix": f"_act_single_and_multi_pretrain_sae_cls_latentqa_posttrain_{model_name_str}",
-        },
+        # {
+        #     "load_lora_path": f"checkpoints_act_single_and_multi_pretrain_only_{model_name_str}/final",
+        #     "dataset_loaders": (
+        #         classification_dataset_loaders
+        #         + sae_explanation_dataset_loaders
+        #         + sae_dataset_loaders
+        #         + latentqa_loaders
+        #     ),
+        #     "wandb_suffix": f"_act_single_and_multi_pretrain_sae_cls_latentqa_posttrain_{model_name_str}",
+        # },
         # {
         #     "load_lora_path": None,
         #     "dataset_loaders": past_lens_loaders,
@@ -941,15 +941,21 @@ if __name__ == "__main__":
         #     "dataset_loaders": classification_dataset_loaders + latentqa_loaders,
         #     "wandb_suffix": f"_act_single_and_multi_pretrain_classification_latentqa_posttrain_{model_name_str}",
         # },
+        {
+            "load_lora_path": None,
+            "dataset_loaders": latentqa_loaders,
+            "wandb_suffix": f"_latentqa_only_orig_setup_{model_name_str}",
+        },
+        {
+            "load_lora_path": None,
+            "dataset_loaders": latentqa_loaders,
+            "seed": 43,
+            "wandb_suffix": f"_latentqa_only_seed_43_{model_name_str}",
+        },
         # {
         #     "load_lora_path": None,
-        #     "dataset_loaders": latentqa_loaders,
-        #     "wandb_suffix": f"_latentqa_{model_name_str}",
-        # },
-        # {
-        #     "load_lora_path": None,
-        #     "dataset_loaders": latentqa_loaders + classification_dataset_loaders,
-        #     "wandb_suffix": f"_latentqa_classification_{model_name_str}",
+        #     "dataset_loaders": latentqa_loaders + classification_dataset_loaders + past_lens_loaders,
+        #     "wandb_suffix": f"_latentqa_cls_past_lens_{model_name_str}",
         # },
         # {
         #     "load_lora_path": f"checkpoints_all_single_and_multi_pretrain_only_{model_name_str}/final",

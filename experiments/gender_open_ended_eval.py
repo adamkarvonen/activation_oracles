@@ -45,6 +45,13 @@ if __name__ == "__main__":
             "adamkarvonen/checkpoints_latentqa_only_addition_gemma-2-9b-it",
             "adamkarvonen/checkpoints_cls_latentqa_only_addition_gemma-2-9b-it",
             "adamkarvonen/checkpoints_cls_only_addition_gemma-2-9b-it",
+            None,
+            # "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_1e-6",
+            # "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_3e-6",
+            # "adamkarvonen/checkpoints_latentqa_only_addition_gemma-2-9b-it",
+            # "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_3e-5",
+            # "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_1e-4",
+            # "adamkarvonen/checkpoints_latentqa_only_gemma-2-9b-it_lr_3e-4",
         ]
         target_lora_path_template = "bcywinski/gemma-2-9b-it-user-{lora_path}"
         segment_start = -10
@@ -68,7 +75,15 @@ if __name__ == "__main__":
         "max_new_tokens": 20,
     }
 
-    config = base_experiment.VerbalizerEvalConfig(model_name=model_name, activation_input_types=["lora"], eval_batch_size=512, verbalizer_generation_kwargs=generation_kwargs, full_seq_repeats=1, segment_repeats=1, segment_start_idx=segment_start)
+    config = base_experiment.VerbalizerEvalConfig(
+        model_name=model_name,
+        activation_input_types=["lora"],
+        eval_batch_size=512,
+        verbalizer_generation_kwargs=generation_kwargs,
+        full_seq_repeats=1,
+        segment_repeats=1,
+        segment_start_idx=segment_start,
+    )
 
     experiments_dir: str = "experiments/gender_results"
     output_json_dir: str = f"{experiments_dir}/{model_name_str}_open_ended_{PROMPT_TYPE}_{DATASET_TYPE}"

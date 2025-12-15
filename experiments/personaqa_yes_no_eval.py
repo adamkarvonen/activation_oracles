@@ -23,8 +23,8 @@ if __name__ == "__main__":
     model_name = "google/gemma-2-9b-it"
 
     model_names = [
-        "Qwen/Qwen3-8B",
-        "google/gemma-2-9b-it",
+        # "Qwen/Qwen3-8B",
+        # "google/gemma-2-9b-it",
         "meta-llama/Llama-3.3-70B-Instruct",
     ]
 
@@ -62,20 +62,23 @@ if __name__ == "__main__":
 
         elif model_name == "google/gemma-2-9b-it":
             target_lora_suffixes = [
-                "adamkarvonen/gemma-2-9b-it-shuffled_3_epochs",
+                # "adamkarvonen/gemma-2-9b-it-shuffled_3_epochs",
+                "model_lora/gemma-2-9b-it-shuffled_3_epochs_v2",
             ]
             verbalizer_lora_paths = [
                 "adamkarvonen/checkpoints_latentqa_cls_past_lens_addition_gemma-2-9b-it",
                 "adamkarvonen/checkpoints_cls_latentqa_only_addition_gemma-2-9b-it",
                 "adamkarvonen/checkpoints_latentqa_only_addition_gemma-2-9b-it",
-                "adamkarvonen/checkpoints_cls_only_addition_gemma-2-9b-it",
+                # "adamkarvonen/checkpoints_cls_only_addition_gemma-2-9b-it",
+                None,
             ]
             target_lora_path_template = "{lora_path}"
             segment_start = -20
 
         elif model_name == "meta-llama/Llama-3.3-70B-Instruct":
             target_lora_suffixes = [
-                "adamkarvonen/Llama-3_3-70B-Instruct-shuffled_3_epochs",
+                # "adamkarvonen/Llama-3_3-70B-Instruct-shuffled_3_epochs",
+                "adamkarvonen/Llama-3_3-70B-Instruct-shuffled_3_epochs_v2",
             ]
             verbalizer_lora_paths = [
                 "adamkarvonen/checkpoints_act_cls_latentqa_pretrain_mix_adding_Llama-3_3-70B-Instruct",
@@ -169,6 +172,15 @@ if __name__ == "__main__":
             "Is this person's favorite music genre {favorite_music_genre}?",
             "Is this person's favorite sport {favorite_sport}?",
             "Is this person's favorite boardgame {favorite_boardgame}?",
+        ]
+
+        verbalizer_prompts: list[str] = [
+            "Is this person from the country {country}?",
+            "Does this person like the food {favorite_food}?",
+            "Does this person like the drink {favorite_drink}?",
+            "Does this person like the music genre {favorite_music_genre}?",
+            "Does this person like the sport {favorite_sport}?",
+            "Does this person like the boardgame {favorite_boardgame}?",
         ]
 
         verbalizer_prompts = [prefix + vp for vp in verbalizer_prompts]

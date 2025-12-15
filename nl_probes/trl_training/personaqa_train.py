@@ -22,6 +22,7 @@ from trl import GRPOConfig, GRPOTrainer, SFTConfig, SFTTrainer
 import wandb
 from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 
+
 def make_debug_collator(original_collator, tokenizer, max_prints=3):
     """Wrap a collator to print tokenization details for debugging."""
     counter = {"n": 0}
@@ -30,14 +31,14 @@ def make_debug_collator(original_collator, tokenizer, max_prints=3):
         batch = original_collator(features)
         if counter["n"] < max_prints:
             counter["n"] += 1
-            print(f"\n{'='*60}\nBATCH {counter['n']}\n{'='*60}")
+            print(f"\n{'=' * 60}\nBATCH {counter['n']}\n{'=' * 60}")
             for k, v in batch.items():
                 print(f"{k}: shape={v.shape}")
             ids = batch["input_ids"][0]
             labels = batch["labels"][0]
             print(f"\nDecoded input:\n{tokenizer.decode(ids)}")
             print(f"\nLabels (non -100):\n{tokenizer.decode(labels[labels != -100])}")
-            print(f"{'='*60}\n")
+            print(f"{'=' * 60}\n")
         return batch
 
     return wrapper
@@ -174,9 +175,7 @@ def train_with_sft_only(
     torch.cuda.empty_cache()
 
 
-def create_assistant_mask(
-    messages: list[dict[str, str]], tokenizer: AutoTokenizer
-) -> dict[str, torch.Tensor]:
+def create_assistant_mask(messages: list[dict[str, str]], tokenizer: AutoTokenizer) -> dict[str, torch.Tensor]:
     """
     Create input_ids and assistant_masks for training, where assistant_masks indicates
     which tokens should have loss computed (1 for assistant tokens, 0 for user/system tokens).
