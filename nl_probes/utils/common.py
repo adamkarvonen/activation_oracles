@@ -3,7 +3,7 @@ import random
 import numpy as np
 import torch
 from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 
 def set_seed(seed: int) -> None:
@@ -118,16 +118,18 @@ def assert_no_peft_present(model, check_for_active_adapter_only=False):
     )
 
 
+def get_layer_count(model_name: str) -> int:
+    """Get the number of layers from a HuggingFace model config."""
+    config = AutoConfig.from_pretrained(model_name)
+    if hasattr(config, "num_hidden_layers"):
+        return config.num_hidden_layers
+    elif hasattr(config, "text_config"):
+        # Gemma-3 models store config in text_config
+        return config.text_config.num_hidden_layers
+    raise AttributeError(f"Could not find layer count for {model_name}")
+
+
 def layer_percent_to_layer(model_name: str, layer_percent: int) -> int:
     """Convert a layer percent to a layer number."""
-    LAYER_COUNTS = {
-        "Qwen/Qwen3-1.7B": 28,
-        "Qwen/Qwen3-8B": 36,
-        "Qwen/Qwen3-32B": 64,
-        "google/gemma-2-9b-it": 42,
-        "google/gemma-3-1b-it": 26,
-        "meta-llama/Llama-3.2-1B-Instruct": 16,
-        "meta-llama/Llama-3.3-70B-Instruct": 80,
-    }
-    max_layers = LAYER_COUNTS[model_name]
+    max_layers = get_layer_count(model_name)
     return int(max_layers * (layer_percent / 100))
