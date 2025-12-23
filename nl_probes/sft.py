@@ -43,7 +43,7 @@ from nl_probes.dataset_classes.sae_training_data import (
     SAEYesNoDatasetConfig,
     SAEYesNoDatasetLoader,
 )
-from nl_probes.utils.activation_utils import get_hf_submodule
+from nl_probes.utils.activation_utils import get_hf_submodule, get_text_only_lora_targets
 from nl_probes.utils.common import load_model, load_tokenizer, set_seed
 from nl_probes.utils.dataset_utils import (
     BatchData,
@@ -337,11 +337,17 @@ def train_model(
     submodule = get_hf_submodule(model, cfg.hook_onto_layer)
 
     if cfg.use_lora and cfg.load_lora_path is None:
+        target_modules = cfg.lora_target_modules
+        vlm_targets = get_text_only_lora_targets(cfg.model_name)
+        if vlm_targets and target_modules == "all-linear":
+            print(f"VLM detected ({cfg.model_name}): excluding vision tower from LoRA")
+            target_modules = vlm_targets
+
         lora_config = LoraConfig(
             r=cfg.lora_r,
             lora_alpha=cfg.lora_alpha,
             lora_dropout=cfg.lora_dropout,
-            target_modules=cfg.lora_target_modules,
+            target_modules=target_modules,
             bias="none",
             task_type="CAUSAL_LM",
         )
@@ -399,9 +405,13 @@ def train_model(
 
     global_step = 0
 
+    # Calculate total tokens upfront
+    total_tokens = sum(len(dp.input_ids) for dp in training_data)
+
     # Init Weights & Biases only on rank 0
     if rank == 0:
         wandb.init(project=cfg.wandb_project, name=cfg.wandb_run_name, config=asdict(cfg))
+        wandb.log({"train/total_tokens": total_tokens})
 
     for epoch in range(cfg.num_epochs):
         accumulated_loss = 0.0
@@ -859,126 +869,138 @@ if __name__ == "__main__":
     # model_name = "Qwen/Qwen3-32B"
     # model_name = "meta-llama/Llama-3.3-70B-Instruct"
     # model_name = "google/gemma-2-9b-it"
-    model_name = "Qwen/Qwen3-8B"
-    hf_repo_name = "N/A"
+    # model_name = "Qwen/Qwen3-8B"
 
-    model_name_str = model_name.split("/")[-1].replace(".", "_").replace(" ", "_")
-
-    train_batch_size = 16
-    gradient_checkpointing = True
-    model_kwargs = {}
-
-    if model_name == "Qwen/Qwen3-32B" or model_name == "meta-llama/Llama-3.3-70B-Instruct":
-        bnb_config = BitsAndBytesConfig(
-            load_in_8bit=True,
-            bnb_8bit_compute_dtype=dtype,
-        )
-        model_kwargs = {"quantization_config": bnb_config}
-
-    # if model_name == "meta-llama/Llama-3.3-70B-Instruct":
-    # train_batch_size = train_batch_size * 4  # increase gpu utilization on 4x GPUs
-    # cuts training time by ~50%
-
-    print("Global train batch size:", train_batch_size)
-    assert train_batch_size % world_size == 0, (
-        f"Global batch size {train_batch_size} must be divisible by world_size {world_size}"
-    )
-    train_batch_size = train_batch_size // world_size
-    print(f"Per-rank train batch size: {train_batch_size}, world size: {world_size}")
-
-    layer_percents = [25, 50, 75]
-    save_acts = False
-
-    gradient_accumulation_steps = 1
-
-    # Build loader groups (single + multi variants)
-    loader_groups = build_loader_groups(
-        model_name=model_name,
-        layer_percents=layer_percents,
-        act_collection_batch_size=train_batch_size,
-        save_acts=save_acts,
-        classification_datasets=classification_datasets,
-        model_kwargs=model_kwargs,
-    )
-
-    classification_dataset_loaders = loader_groups["classification_loaders"]
-    past_lens_loaders = loader_groups["past_lens_loaders"]
-    sae_dataset_loaders = loader_groups["sae_loaders"]
-    sae_explanation_dataset_loaders = loader_groups["sae_explanation_loaders"]
-    latentqa_loaders = loader_groups["latentqa_loaders"]
-
-    iterations = [
-        # Default dataset mixture
-        # Set load_lora_path to checkpoint path to continue training
-        {
-            "load_lora_path": None,
-            "dataset_loaders": latentqa_loaders + classification_dataset_loaders + past_lens_loaders,
-            "wandb_suffix": f"_latentqa_cls_past_lens_{model_name_str}",
-        },
-        # {
-        #     "load_lora_path": None,
-        #     "dataset_loaders": latentqa_loaders,
-        #     "wandb_suffix": f"_latentqa_only_{model_name_str}",
-        # },
+    models = [
+        # "Qwen/Qwen3-14B",
+        # "google/gemma-2-27b-it",
+        # "meta-llama/Llama-3.1-8B-Instruct",
+        # TODO: DDP bugs with gemma-3 models
+        "google/gemma-3-4b-it",
+        "google/gemma-3-12b-it",
+        "google/gemma-3-27b-it",
     ]
 
-    for hyperparam_override in iterations:
-        loop_dataset_loaders = hyperparam_override.pop("dataset_loaders")
-        if hyperparam_override["load_lora_path"] is not None:
-            assert os.path.exists(hyperparam_override["load_lora_path"]), f"{hyperparam_override['load_lora_path']}"
+    for model_name in models:
+        hf_repo_name = "N/A"
 
-        cfg = SelfInterpTrainingConfig(
+        model_name_str = model_name.split("/")[-1].replace(".", "_").replace(" ", "_")
+
+        train_batch_size = 16
+        gradient_checkpointing = True
+        model_kwargs = {}
+
+        if model_name == "Qwen/Qwen3-32B" or model_name == "meta-llama/Llama-3.3-70B-Instruct":
+            bnb_config = BitsAndBytesConfig(
+                load_in_8bit=True,
+                bnb_8bit_compute_dtype=dtype,
+            )
+            model_kwargs = {"quantization_config": bnb_config}
+
+        # if model_name == "meta-llama/Llama-3.3-70B-Instruct":
+        # train_batch_size = train_batch_size * 4  # increase gpu utilization on 4x GPUs
+        # cuts training time by ~50%
+
+        print("Global train batch size:", train_batch_size)
+        assert train_batch_size % world_size == 0, (
+            f"Global batch size {train_batch_size} must be divisible by world_size {world_size}"
+        )
+        train_batch_size = train_batch_size // world_size
+        print(f"Per-rank train batch size: {train_batch_size}, world size: {world_size}")
+
+        layer_percents = [25, 50, 75]
+        save_acts = False
+
+        gradient_accumulation_steps = 1
+
+        # Build loader groups (single + multi variants)
+        loader_groups = build_loader_groups(
             model_name=model_name,
-            hook_onto_layer=hook_layer,
-            hf_repo_name=hf_repo_name,
-            # wandb_suffix=wandb_suffix,
             layer_percents=layer_percents,
-            train_batch_size=train_batch_size,
-            activation_collection_batch_size=train_batch_size * 4,
-            eval_batch_size=train_batch_size * 8,
-            eval_steps=10_000,
-            eval_on_start=True,
-            gradient_checkpointing=gradient_checkpointing,
-            gradient_accumulation_steps=gradient_accumulation_steps,
-            **hyperparam_override,
-        )
-
-        cfg.finalize(dataset_loaders=loop_dataset_loaders)
-
-        print(f"save dir: {cfg.save_dir}")
-
-        tokenizer = load_tokenizer(cfg.model_name)
-
-        # Ensure only rank 0 performs any on-disk dataset creation
-        if local_rank == 0:
-            _ensure_datasets_exist(loop_dataset_loaders)
-        dist.barrier()
-
-        all_training_data, all_eval_data = build_datasets(
-            cfg, dataset_loaders=loop_dataset_loaders, window_mult=cfg.window_mult
-        )
-
-        # for debugging
-        # all_training_data = all_training_data[:1000]
-        # eval_keys = list(all_eval_data.keys())
-        # assert len(eval_keys) == 1
-        # eval_key = eval_keys[0]
-        # all_eval_data = {eval_key: all_training_data[:]}
-
-        print(f"training data length: {len(all_training_data)}, eval data length: {len(all_eval_data)}")
-
-        print(asdict(cfg))
-
-        train_model(
-            cfg=cfg,
-            training_data=all_training_data,
-            eval_datasets=all_eval_data,
-            tokenizer=tokenizer,
-            dtype=dtype,
-            device=device,
+            act_collection_batch_size=train_batch_size,
+            save_acts=save_acts,
+            classification_datasets=classification_datasets,
             model_kwargs=model_kwargs,
-            verbose=True,
         )
+
+        classification_dataset_loaders = loader_groups["classification_loaders"]
+        past_lens_loaders = loader_groups["past_lens_loaders"]
+        sae_dataset_loaders = loader_groups["sae_loaders"]
+        sae_explanation_dataset_loaders = loader_groups["sae_explanation_loaders"]
+        latentqa_loaders = loader_groups["latentqa_loaders"]
+
+        iterations = [
+            # Default dataset mixture
+            # Set load_lora_path to checkpoint path to continue training
+            {
+                "load_lora_path": None,
+                "dataset_loaders": latentqa_loaders + classification_dataset_loaders + past_lens_loaders,
+                "wandb_suffix": f"_latentqa_cls_past_lens_{model_name_str}",
+            },
+            # {
+            #     "load_lora_path": None,
+            #     "dataset_loaders": latentqa_loaders,
+            #     "wandb_suffix": f"_latentqa_only_{model_name_str}",
+            # },
+        ]
+
+        for hyperparam_override in iterations:
+            loop_dataset_loaders = hyperparam_override.pop("dataset_loaders")
+            if hyperparam_override["load_lora_path"] is not None:
+                assert os.path.exists(hyperparam_override["load_lora_path"]), f"{hyperparam_override['load_lora_path']}"
+
+            cfg = SelfInterpTrainingConfig(
+                model_name=model_name,
+                hook_onto_layer=hook_layer,
+                hf_repo_name=hf_repo_name,
+                # wandb_suffix=wandb_suffix,
+                layer_percents=layer_percents,
+                train_batch_size=train_batch_size,
+                activation_collection_batch_size=train_batch_size * 4,
+                eval_batch_size=train_batch_size * 8,
+                eval_steps=10_000,
+                eval_on_start=True,
+                gradient_checkpointing=gradient_checkpointing,
+                gradient_accumulation_steps=gradient_accumulation_steps,
+                **hyperparam_override,
+            )
+
+            cfg.finalize(dataset_loaders=loop_dataset_loaders)
+
+            print(f"save dir: {cfg.save_dir}")
+
+            tokenizer = load_tokenizer(cfg.model_name)
+
+            # Ensure only rank 0 performs any on-disk dataset creation
+            if local_rank == 0:
+                _ensure_datasets_exist(loop_dataset_loaders)
+            dist.barrier()
+
+            all_training_data, all_eval_data = build_datasets(
+                cfg, dataset_loaders=loop_dataset_loaders, window_mult=cfg.window_mult
+            )
+
+            # for debugging
+            # all_training_data = all_training_data[:100]
+            # eval_keys = list(all_eval_data.keys())
+            # assert len(eval_keys) == 1
+            # eval_key = eval_keys[0]
+            # all_eval_data = {eval_key: all_training_data[:]}
+
+            print(f"training data length: {len(all_training_data)}, eval data length: {len(all_eval_data)}")
+
+            print(asdict(cfg))
+
+            train_model(
+                cfg=cfg,
+                training_data=all_training_data,
+                eval_datasets=all_eval_data,
+                tokenizer=tokenizer,
+                dtype=dtype,
+                device=device,
+                model_kwargs=model_kwargs,
+                verbose=True,
+            )
 
     # Clean up DDP
     dist.destroy_process_group()

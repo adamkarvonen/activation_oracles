@@ -27,6 +27,3 @@ def test_get_layer_count(model_name: str, expected_layers: int):
     """Verify get_layer_count matches known layer counts from HuggingFace configs."""
     actual_layers = get_layer_count(model_name)
     assert actual_layers == expected_layers, f"{model_name}: expected {expected_layers}, got {actual_layers}"
-
-
-

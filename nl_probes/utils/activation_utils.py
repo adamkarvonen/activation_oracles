@@ -117,6 +117,23 @@ def collect_activations_multiple_layers(
     return activations_BLD_by_layer
 
 
+# LoRA target patterns for text-only training on VLMs (vision-language models).
+# When using target_modules='all-linear', LoRA adapters get added to the vision
+# tower which won't receive gradients during text-only training, causing DDP errors.
+# These patterns target only the language model layers.
+VLM_TEXT_ONLY_LORA_TARGETS = {
+    "gemma-3": r"model\.language_model\..*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)",
+}
+
+
+def get_text_only_lora_targets(model_name: str) -> str | None:
+    """Returns LoRA target pattern for text-only training on VLMs, or None if not a VLM."""
+    for pattern, targets in VLM_TEXT_ONLY_LORA_TARGETS.items():
+        if pattern in model_name.lower():
+            return targets
+    return None
+
+
 def get_hf_submodule(model: AutoModelForCausalLM, layer: int, use_lora: bool = False):
     """Gets the residual stream submodule for HF transformers"""
     model_name = model.config._name_or_path
@@ -124,14 +141,18 @@ def get_hf_submodule(model: AutoModelForCausalLM, layer: int, use_lora: bool = F
     if use_lora:
         if "pythia" in model_name:
             raise ValueError("Need to determine how to get submodule for LoRA")
-        elif "gemma" in model_name or "mistral" in model_name or "Llama" in model_name or "Qwen" in model_name:
+        elif "gemma-3" in model_name:
+            return model.base_model.language_model.layers[layer]
+        elif "gemma-2" in model_name or "mistral" in model_name or "Llama" in model_name or "Qwen" in model_name:
             return model.base_model.model.model.layers[layer]
         else:
             raise ValueError(f"Please add submodule for model {model_name}")
 
     if "pythia" in model_name:
         return model.gpt_neox.layers[layer]
-    elif "gemma" in model_name or "mistral" in model_name or "Llama" in model_name or "Qwen" in model_name:
+    elif "gemma-3" in model_name:
+        return model.language_model.layers[layer]
+    elif "gemma-2" in model_name or "mistral" in model_name or "Llama" in model_name or "Qwen" in model_name:
         return model.model.layers[layer]
     else:
         raise ValueError(f"Please add submodule for model {model_name}")
