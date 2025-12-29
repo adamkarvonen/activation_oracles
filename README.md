@@ -1,6 +1,6 @@
 # Activation Oracles
 
-This repository contains the code for TODO
+This repository contains the code for the [Activation Oracles](https://arxiv.org/abs/2512.15674) paper.
 
 ## Overview
 
@@ -21,7 +21,13 @@ The easiest way to get started is with our demo notebook ([Colab](https://colab.
 - Detecting model goals without observing responses
 - Analyzing emotions and reasoning in model activations
 
-The Colab version runs on a free T4 GPU and uses pre-trained oracle weights.
+The Colab version runs on a free T4 GPU.
+
+## Pre-trained Models
+
+We have pre-trained oracle weights for a variety for 12 different models across the Gemma-2, Gemma-3, Qwen3, and Llama 3 families. They are available on Hugging Face: [Activation Oracles Collection](https://huggingface.co/collections/adamkarvonen/activation-oracles)
+
+The wandb eval / loss logs for these models are available [here](https://api.wandb.ai/links/adam-karvonen/cu11tv7r). Note that the smaller models (1-4B) tend to have worse OOD eval performance, so I'm not sure how well they will work.
 
 ## Training
 
@@ -54,19 +60,18 @@ This runs evaluations on five downstream tasks:
 - Secret Side Constraint (SSC, Secret Keeping Benchmark)
 - Classification
 - PersonaQA
-
-## Pre-trained Models
-
-Pre-trained oracle weights are available on Hugging Face: [Activation Oracles Collection](https://huggingface.co/collections/adamkarvonen/activation-oracles)
-
 ## Citation
 
 If you use this code in your research, please cite our paper:
 
 ```bibtex
-@article{activation_oracles,
-  title={Activation Oracles},
-  author={...},
-  year={2025}
+@misc{karvonen2025activationoraclestrainingevaluating,
+      title={Activation Oracles: Training and Evaluating LLMs as General-Purpose Activation Explainers}, 
+      author={Adam Karvonen and James Chua and Clément Dumas and Kit Fraser-Taliente and Subhash Kantamneni and Julian Minder and Euan Ong and Arnab Sen Sharma and Daniel Wen and Owain Evans and Samuel Marks},
+      year={2025},
+      eprint={2512.15674},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2512.15674}, 
 }
 ```
