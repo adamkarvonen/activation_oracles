@@ -138,11 +138,16 @@ def get_hf_submodule(model: AutoModelForCausalLM, layer: int, use_lora: bool = F
     """Gets the residual stream submodule for HF transformers"""
     model_name = model.config._name_or_path
 
+    if "Qwen3.6" in model_name:
+        # AutoModelForCausalLM loads the text-only Qwen3_5ForCausalLM (vision tower and MTP weights are dropped).
+        # The VLM wrapper Qwen3_5ForConditionalGeneration would put the layers under model.language_model instead.
+        assert model.config.model_type == "qwen3_5_text", f"Expected text-only qwen3_5_text, got {model.config.model_type}"
+
     if use_lora:
         if "pythia" in model_name:
             raise ValueError("Need to determine how to get submodule for LoRA")
         elif "gemma-3" in model_name:
-            return model.base_model.language_model.layers[layer]
+            return model.base_model.model.model.language_model.layers[layer]
         elif "gemma-2" in model_name or "mistral" in model_name or "Llama" in model_name or "Qwen" in model_name:
             return model.base_model.model.model.layers[layer]
         else:
@@ -151,7 +156,7 @@ def get_hf_submodule(model: AutoModelForCausalLM, layer: int, use_lora: bool = F
     if "pythia" in model_name:
         return model.gpt_neox.layers[layer]
     elif "gemma-3" in model_name:
-        return model.language_model.layers[layer]
+        return model.model.language_model.layers[layer]
     elif "gemma-2" in model_name or "mistral" in model_name or "Llama" in model_name or "Qwen" in model_name:
         return model.model.layers[layer]
     else:

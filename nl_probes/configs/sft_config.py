@@ -49,6 +49,7 @@ class SelfInterpTrainingConfig:
     seed: int = 42
     eval_logs_path: str = "eval_logs.json"
     load_lora_path: str | None = None
+    resume_from: str | None = None  # checkpoint dir with adapter + trainer_state.pt, resumes optimizer/scheduler/step
 
     # --- Tracking ---
     wandb_project: str = "sae_introspection"

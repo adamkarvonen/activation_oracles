@@ -311,6 +311,7 @@ def create_training_datapoint(
         tokenize=True,
         add_generation_prompt=True,
         return_tensors=None,
+        return_dict=False,
         padding=False,
         enable_thinking=False,
     )
@@ -324,6 +325,7 @@ def create_training_datapoint(
         tokenize=True,
         add_generation_prompt=False,
         return_tensors=None,
+        return_dict=False,
         padding=False,
         enable_thinking=False,
     )

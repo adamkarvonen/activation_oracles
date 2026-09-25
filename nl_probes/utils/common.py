@@ -22,6 +22,12 @@ def load_model(
 ) -> AutoModelForCausalLM:
     print("🧠 Loading model...")
 
+    if "Qwen3.6" in model_name:
+        # Without these kernels transformers silently falls back to a much slower torch implementation
+        # of the Gated DeltaNet linear attention layers.
+        import causal_conv1d  # noqa: F401
+        import fla  # noqa: F401
+
     # Gemma prefers eager attention; others use FA2
     attn = "eager" if "gemma" in model_name.lower() else "flash_attention_2"
 

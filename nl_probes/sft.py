@@ -332,11 +332,17 @@ def train_model(
 
     if cfg.gradient_checkpointing:
         model.use_cache = False
-        model.gradient_checkpointing_enable()
+        # Reentrant matches the transformers 4.x default the paper models were trained with. The steering hook is
+        # removed before loss.backward(), so the recompute of the hooked layer runs without it; non-reentrant
+        # checkpointing (the transformers 5 default) errors on that. Gradients are unaffected because the hook
+        # adds a detached vector.
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": True})
 
     submodule = get_hf_submodule(model, cfg.hook_onto_layer)
 
-    if cfg.use_lora and cfg.load_lora_path is None:
+    if cfg.resume_from is not None:
+        model = PeftModel.from_pretrained(model, cfg.resume_from, is_trainable=True, autocast_adapter_dtype=True)
+    elif cfg.use_lora and cfg.load_lora_path is None:
         target_modules = cfg.lora_target_modules
         vlm_targets = get_text_only_lora_targets(cfg.model_name)
         if vlm_targets and target_modules == "all-linear":
@@ -353,6 +359,7 @@ def train_model(
         )
         model = get_peft_model(model, lora_config, autocast_adapter_dtype=True)
     elif cfg.load_lora_path is not None:
+        assert cfg.resume_from is None, "Set either load_lora_path or resume_from, not both"
         load_lora_path = Path(cfg.load_lora_path)
         assert load_lora_path.exists()
         model = PeftModel.from_pretrained(model, load_lora_path, is_trainable=True, autocast_adapter_dtype=True)
@@ -412,6 +419,16 @@ def train_model(
     # --------------------------------------------------------------
 
     global_step = 0
+    resume_epoch = 0
+    resume_step_idx = 0
+    if cfg.resume_from is not None:
+        trainer_state = torch.load(Path(cfg.resume_from) / "trainer_state.pt", map_location=device, weights_only=False)
+        optimizer.load_state_dict(trainer_state["optimizer"])
+        scheduler.load_state_dict(trainer_state["scheduler"])
+        global_step = trainer_state["global_step"]
+        resume_epoch = trainer_state["epoch"]
+        resume_step_idx = trainer_state["next_step_idx"]
+        print(f"Resuming from {cfg.resume_from}: global_step {global_step}, epoch {resume_epoch}, step_idx {resume_step_idx}")
 
     # Init Weights & Biases only on rank 0
     if rank == 0:
@@ -420,7 +437,7 @@ def train_model(
         wandb.summary["train/total_tokens_est"] = total_training_tokens_est
         wandb.summary["train/num_examples_pre_shard"] = num_examples_pre_shard
 
-    for epoch in range(cfg.num_epochs):
+    for epoch in range(resume_epoch, cfg.num_epochs):
         accumulated_loss = 0.0
         optimizer.zero_grad()
         for step_idx, start in enumerate(
@@ -430,6 +447,9 @@ def train_model(
                 disable=rank != 0,
             )
         ):
+            if epoch == resume_epoch and step_idx < resume_step_idx:
+                continue
+
             t_batch_list: list[TrainingDataPoint] = training_data[start : start + cfg.train_batch_size]
 
             # Compute missing steering vectors using the PEFT model (not DDP wrapper)
@@ -470,7 +490,18 @@ def train_model(
 
                 if global_step % cfg.save_steps == 0 and global_step > 0:
                     if rank == 0:
-                        model.save_pretrained(f"{cfg.save_dir}/step_{global_step}")
+                        ckpt_dir = f"{cfg.save_dir}/step_{global_step}"
+                        model.save_pretrained(ckpt_dir)
+                        torch.save(
+                            {
+                                "optimizer": optimizer.state_dict(),
+                                "scheduler": scheduler.state_dict(),
+                                "global_step": global_step + 1,
+                                "epoch": epoch,
+                                "next_step_idx": step_idx + 1,
+                            },
+                            f"{ckpt_dir}/trainer_state.pt",
+                        )
                         if cfg.hf_push_to_hub and cfg.hf_repo_id:
                             print("Pushing LoRA adapter to Hugging Face Hub...")
                             push_lora_to_hf(
@@ -885,7 +916,8 @@ if __name__ == "__main__":
         # "google/gemma-3-4b-it",
         # "google/gemma-3-12b-it",
         # "google/gemma-3-27b-it",
-        "Qwen/Qwen3-4B",
+        # "Qwen/Qwen3-4B",
+        "Qwen/Qwen3.6-27B",
     ]
 
     for model_name in models:
@@ -896,6 +928,11 @@ if __name__ == "__main__":
         train_batch_size = 16
         gradient_checkpointing = True
         model_kwargs = {}
+        save_steps = 5_000
+
+        if model_name == "Qwen/Qwen3.6-27B":
+            # ~1.6 hours between checkpoints on 1x H200 (5.3 GB each incl. optimizer state), for resume_from
+            save_steps = 4_000
 
         if model_name == "Qwen/Qwen3-32B" or model_name == "meta-llama/Llama-3.3-70B-Instruct":
             bnb_config = BitsAndBytesConfig(
@@ -941,6 +978,7 @@ if __name__ == "__main__":
             # Set load_lora_path to checkpoint path to continue training
             {
                 "load_lora_path": None,
+                "resume_from": os.environ.get("AO_RESUME_FROM"),
                 "dataset_loaders": latentqa_loaders + classification_dataset_loaders + past_lens_loaders,
                 "wandb_suffix": f"_latentqa_cls_past_lens_{model_name_str}",
             },
@@ -969,10 +1007,14 @@ if __name__ == "__main__":
                 eval_on_start=True,
                 gradient_checkpointing=gradient_checkpointing,
                 gradient_accumulation_steps=gradient_accumulation_steps,
+                save_steps=save_steps,
                 **hyperparam_override,
             )
 
             cfg.finalize(dataset_loaders=loop_dataset_loaders)
+
+            if model_name == "Qwen/Qwen3.6-27B":
+                assert cfg.act_layers == [16, 32, 48], cfg.act_layers
 
             print(f"save dir: {cfg.save_dir}")
 

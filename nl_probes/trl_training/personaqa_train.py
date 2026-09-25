@@ -199,6 +199,7 @@ def create_assistant_mask(messages: list[dict[str, str]], tokenizer: AutoTokeniz
     chat_template_kwargs = dict(
         tokenize=True,
         return_tensors=None,
+        return_dict=False,
         padding=False,
         enable_thinking=False,
     )

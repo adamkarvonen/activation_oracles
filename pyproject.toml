@@ -5,7 +5,7 @@ description = "nl_probes"
 requires-python = ">=3.10"
 readme = "README.md"
 dependencies = [
-    "accelerate==1.10.1",
+    "accelerate==1.15.0",
     "codetiming",
     "datasets==3.6.0",
     "dill",
@@ -13,7 +13,7 @@ dependencies = [
     "liger-kernel",
     "numpy<2.0.0",
     "pandas",
-    "peft==0.17.1",
+    "peft==0.21.0",
     "pyarrow>=19.0.0",
     "fastparquet",
     "pybind11",
@@ -21,11 +21,14 @@ dependencies = [
     "pre-commit",
     "ray[default]",
     "tensordict>=0.8.0,<=0.9.1,!=0.9.0",
-    "torch==2.7.1",
+    # torch 2.12 bundles Triton 3.7.1. Triton 3.4-3.7.0 gives wrong gated DeltaNet backward results on Hopper (fla #640)
+    "torch==2.12.1",
     "flash-attn",
+    # Fast Gated DeltaNet kernels for Qwen3.5 / Qwen3.6 linear attention layers
+    "flash-linear-attention==0.5.2",
+    "causal-conv1d==1.7.0",
     "torchdata",
-    "transformers==4.55.2",
-    "vllm==0.10.0",
+    "transformers==5.17.0",
     "einops==0.8.1",
     "wandb==0.21.1",
     "packaging>=20.0",
@@ -43,7 +46,7 @@ dependencies = [
     "openai",
     "tenacity",
     "matplotlib",
-    "trl==0.18.2",
+    "trl==0.29.0",
     "bitsandbytes==0.48.1",
     "fire",
     "tqdm",
@@ -56,6 +59,11 @@ dependencies = [
     "hf_transfer",
 ]
 
+[project.optional-dependencies]
+# Only used by some experiment scripts (personaqa knowledge evals, patchscopes). Install in a separate env if needed;
+# vllm pins its own torch/transformers versions.
+vllm = ["vllm"]
+
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -66,3 +74,11 @@ include = ["nl_probes", "nl_probes.*"]
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
+causal-conv1d = [{ requirement = "torch", match-runtime = true }]
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu129", marker = "sys_platform == 'linux'" }]
