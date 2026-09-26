@@ -59,10 +59,8 @@ dependencies = [
     "hf_transfer",
 ]
 
-[project.optional-dependencies]
-# Only used by some experiment scripts (personaqa knowledge evals, patchscopes). Install in a separate env if needed;
-# vllm pins its own torch/transformers versions.
-vllm = ["vllm"]
+# vllm is not a dependency: it pins its own torch/transformers versions. It is only used by a few experiment scripts
+# (personaqa knowledge evals, patchscopes), which need a separate env with vllm installed.
 
 [build-system]
 requires = ["setuptools", "wheel"]
