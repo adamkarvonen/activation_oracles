@@ -328,6 +328,13 @@ def train_model(
     set_seed(cfg.seed)
     model = load_model(cfg.model_name, dtype, **model_kwargs)
 
+    # Not every config has layer_types (e.g. GPT-NeoX), hence the default.
+    if "linear_attention" in getattr(model.config.get_text_config(), "layer_types", []):
+        # Linear attention models (Gated DeltaNet, e.g. Qwen3.5 / Qwen3.6) fall back to a >10x slower torch
+        # implementation without these kernels. Install them with `uv sync --extra linear-attn`.
+        import causal_conv1d  # noqa: F401
+        import fla  # noqa: F401
+
     model.enable_input_require_grads()
 
     if cfg.gradient_checkpointing:
@@ -930,10 +937,6 @@ if __name__ == "__main__":
         model_kwargs = {}
         save_steps = 5_000
 
-        if model_name == "Qwen/Qwen3.6-27B":
-            # ~1.6 hours between checkpoints on 1x H200 (5.3 GB each incl. optimizer state), for resume_from
-            save_steps = 4_000
-
         if model_name == "Qwen/Qwen3-32B" or model_name == "meta-llama/Llama-3.3-70B-Instruct":
             bnb_config = BitsAndBytesConfig(
                 load_in_8bit=True,
@@ -1012,9 +1015,6 @@ if __name__ == "__main__":
             )
 
             cfg.finalize(dataset_loaders=loop_dataset_loaders)
-
-            if model_name == "Qwen/Qwen3.6-27B":
-                assert cfg.act_layers == [16, 32, 48], cfg.act_layers
 
             print(f"save dir: {cfg.save_dir}")
 

@@ -24,9 +24,6 @@ dependencies = [
     # torch 2.12 bundles Triton 3.7.1. Triton 3.4-3.7.0 gives wrong gated DeltaNet backward results on Hopper (fla #640)
     "torch==2.12.1",
     "flash-attn",
-    # Fast Gated DeltaNet kernels for Qwen3.5 / Qwen3.6 linear attention layers
-    "flash-linear-attention==0.5.2",
-    "causal-conv1d==1.7.0",
     "torchdata",
     "transformers==5.17.0",
     "einops==0.8.1",
@@ -57,6 +54,14 @@ dependencies = [
     "huggingface-hub",
     "rapidfuzz",
     "hf_transfer",
+]
+
+[project.optional-dependencies]
+# Fast Gated DeltaNet kernels for linear attention models (e.g. Qwen3.5 / Qwen3.6). Required for training them
+# (sft.py checks); inference works without them via the slower torch fallback. causal-conv1d is a CUDA extension.
+linear-attn = [
+    "flash-linear-attention==0.5.2",
+    "causal-conv1d==1.7.0",
 ]
 
 # vllm is not a dependency: it pins its own torch/transformers versions. It is only used by a few experiment scripts

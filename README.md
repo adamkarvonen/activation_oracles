@@ -50,7 +50,7 @@ You can train any model that's available on HuggingFace transformers by setting 
 
 Checkpoints (adapter plus optimizer state) are saved every `save_steps`. To resume an interrupted run, set `AO_RESUME_FROM=<save_dir>/step_<N>` before launching.
 
-Qwen3.6 uses Gated DeltaNet linear attention, which needs the `flash-linear-attention` and `causal-conv1d` kernels (installed by `uv sync`; model loading fails if they are missing). Qwen3.6-27B trains on a single H200 in about 24 hours.
+Models with linear attention layers (e.g. Qwen3.5 / Qwen3.6, Gated DeltaNet) need the fast kernels for training: install them with `uv sync --extra linear-attn`. Training fails at startup if they are missing. Inference works without them, using a slower torch fallback. Qwen3.6-27B trains on a single H200 in about 24 hours.
 
 Training configuration can be modified in `nl_probes/configs/sft_config.py`.
 

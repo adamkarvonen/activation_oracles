@@ -2590,7 +2590,6 @@ dependencies = [
     { name = "accelerate" },
     { name = "anthropic" },
     { name = "bitsandbytes" },
-    { name = "causal-conv1d" },
     { name = "circuitsvis" },
     { name = "codetiming" },
     { name = "datasets" },
@@ -2600,7 +2599,6 @@ dependencies = [
     { name = "fastparquet" },
     { name = "fire" },
     { name = "flash-attn" },
-    { name = "flash-linear-attention" },
     { name = "hf-transfer" },
     { name = "huggingface-hub" },
     { name = "hydra-core" },
@@ -2640,12 +2638,18 @@ dependencies = [
     { name = "wandb" },
 ]
 
+[package.optional-dependencies]
+linear-attn = [
+    { name = "causal-conv1d" },
+    { name = "flash-linear-attention" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = "==1.15.0" },
     { name = "anthropic" },
     { name = "bitsandbytes", specifier = "==0.48.1" },
-    { name = "causal-conv1d", specifier = "==1.7.0" },
+    { name = "causal-conv1d", marker = "extra == 'linear-attn'", specifier = "==1.7.0" },
     { name = "circuitsvis", specifier = ">=1.43.3" },
     { name = "codetiming" },
     { name = "datasets", specifier = "==3.6.0" },
@@ -2655,7 +2659,7 @@ requires-dist = [
     { name = "fastparquet" },
     { name = "fire" },
     { name = "flash-attn" },
-    { name = "flash-linear-attention", specifier = "==0.5.2" },
+    { name = "flash-linear-attention", marker = "extra == 'linear-attn'", specifier = "==0.5.2" },
     { name = "hf-transfer" },
     { name = "huggingface-hub" },
     { name = "hydra-core" },

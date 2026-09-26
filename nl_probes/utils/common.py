@@ -22,12 +22,6 @@ def load_model(
 ) -> AutoModelForCausalLM:
     print("🧠 Loading model...")
 
-    if "Qwen3.6" in model_name:
-        # Without these kernels transformers silently falls back to a much slower torch implementation
-        # of the Gated DeltaNet linear attention layers.
-        import causal_conv1d  # noqa: F401
-        import fla  # noqa: F401
-
     # Gemma prefers eager attention; others use FA2
     attn = "eager" if "gemma" in model_name.lower() else "flash_attention_2"
 
@@ -126,13 +120,8 @@ def assert_no_peft_present(model, check_for_active_adapter_only=False):
 
 def get_layer_count(model_name: str) -> int:
     """Get the number of layers from a HuggingFace model config."""
-    config = AutoConfig.from_pretrained(model_name)
-    if hasattr(config, "num_hidden_layers"):
-        return config.num_hidden_layers
-    elif hasattr(config, "text_config"):
-        # Gemma-3 models store config in text_config
-        return config.text_config.num_hidden_layers
-    raise AttributeError(f"Could not find layer count for {model_name}")
+    # get_text_config() returns the decoder config for both text models and VLMs (e.g. Gemma-3, Qwen3.6)
+    return AutoConfig.from_pretrained(model_name).get_text_config().num_hidden_layers
 
 
 def layer_percent_to_layer(model_name: str, layer_percent: int) -> int:
